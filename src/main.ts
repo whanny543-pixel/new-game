@@ -7,7 +7,10 @@ import { Input } from './input';
 import { makeEnvironment } from './materials';
 import { rollPerks } from './perks';
 import { Renderer } from './render';
-import { Run } from './run';
+import { MAX_ENEMIES, Run } from './run';
+import { Assets } from './assets';
+import { Horde } from './horde';
+import { useAssets } from './structures';
 import { World } from './world';
 import './style.css';
 
@@ -44,6 +47,7 @@ class Game {
   private sfx = new Sfx();
   private input: Input;
   private run: Run | null = null;
+  private horde: Horde | null = null;
   private state: State = 'menu';
   private clock = new THREE.Clock();
   private w = 1;
@@ -57,7 +61,7 @@ class Game {
     this.scene.environment = makeEnvironment(this.renderer.gl);
     this.scene.environmentIntensity = 0.28;
 
-    this.world = new World(this.scene, mobile ? 1024 : 2048);
+    this.world = new World(this.scene, mobile ? 2048 : 4096);
     this.fx = new Fx(this.scene, document.getElementById('world-ui')!);
     this.input = new Input(document.getElementById('app')!);
 
@@ -68,9 +72,25 @@ class Game {
     this.bindUi();
     this.showMenu();
 
-    // A demo run plays behind the title screen so the world is alive from the first frame.
-    this.newRun();
-    this.world.decorate(this.scene, this.run!.reservedSpots());
+    // Load the 3D models, then start a demo run behind the title screen.
+    const play = document.getElementById('btn-play') as HTMLButtonElement;
+    play.disabled = true;
+    play.textContent = 'Loading… 0%';
+    Assets.load((f) => (play.textContent = `Loading… ${Math.round(f * 100)}%`))
+      .then((assets) => {
+        useAssets(assets);
+        this.horde = new Horde(assets, this.scene, MAX_ENEMIES);
+        this.newRun();
+        this.world.decorate(this.scene, this.run!.reservedSpots(), assets);
+        play.disabled = false;
+        play.textContent = 'Play';
+      })
+      .catch((err) => {
+        console.error(err);
+        play.textContent = 'Could not load. Tap to retry';
+        play.disabled = false;
+        play.onclick = () => location.reload();
+      });
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.state === 'playing') this.pause();
@@ -135,7 +155,7 @@ class Game {
       },
       hurt: (a) => (this.renderer.hurt = Math.max(this.renderer.hurt, a)),
       flash: (a) => (this.renderer.flash = Math.max(this.renderer.flash, a)),
-    });
+    }, this.horde!);
     this.camFocus.copy(this.run.heroPos);
   }
 
@@ -217,7 +237,15 @@ class Game {
 
   private frame() {
     const rawDt = Math.min(this.clock.getDelta(), 1 / 20);
-    const run = this.run!;
+    const run = this.run;
+    if (!run) {
+      // Still loading: keep the scene alive behind the title card.
+      this.menuT += rawDt;
+      this.camera.position.set(Math.sin(this.menuT * 0.2) * 4, 34, 12);
+      this.camera.lookAt(0, 0, -4);
+      this.renderer.render(this.scene, this.camera, rawDt, rawDt);
+      return;
+    }
     this.input.update();
 
     // Hit-stop: big moments freeze the action for a beat.
@@ -252,6 +280,10 @@ class Game {
       this.camFocus.z + 14.5 * zoom + (Math.random() - 0.5) * shake * 0.6,
     );
     this.camera.lookAt(this.camFocus.x, 0, this.camFocus.z - 1.2);
+    if (this.debugCam) {
+      this.camera.position.copy(this.debugCam.pos);
+      this.camera.lookAt(this.debugCam.look);
+    }
 
     this.world.update(this.camFocus);
     const fxDt = this.state === 'paused' || this.state === 'levelup' ? 0 : dt;
@@ -262,6 +294,8 @@ class Game {
   }
 
   private look = new THREE.Vector3();
+  /** Playtest hook: pin the camera somewhere specific. */
+  debugCam: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
 }
 
 const game = new Game();

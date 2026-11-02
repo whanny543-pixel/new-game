@@ -3,7 +3,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { COLORS, ROAD_HALF_WIDTH, ROADS } from './config';
 import { Road } from './road';
 import { detailize } from './materials';
-import { MAT, makeBush, makeCactus, makeDeadTree, makeLantern, makeMesa, makeProps, makeRock } from './models';
+import { makeLantern } from './models';
+import type { Assets } from './assets';
 
 /** Small deterministic RNG so the map looks the same every run. */
 export function mulberry32(seed: number) {
@@ -57,6 +58,66 @@ function sandTexture(size = 512) {
   return t;
 }
 
+/**
+ * Merges every mesh under `group` into one mesh per material (world transforms baked in).
+ * Hundreds of trees, rocks and houses become a couple of draw calls.
+ */
+function bakeStatic(group: THREE.Object3D) {
+  group.updateMatrixWorld(true);
+  const byMat = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
+  const v = new THREE.Vector3();
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || Array.isArray(m.material)) return;
+    const src = m.geometry;
+    const n = src.attributes.position.count;
+    const pos = new Float32Array(n * 3);
+    const nrm = new Float32Array(n * 3);
+    const uv = new Float32Array(n * 2);
+    const nm = new THREE.Matrix3().getNormalMatrix(m.matrixWorld);
+    for (let i = 0; i < n; i++) {
+      v.fromBufferAttribute(src.attributes.position, i).applyMatrix4(m.matrixWorld);
+      pos[i * 3] = v.x;
+      pos[i * 3 + 1] = v.y;
+      pos[i * 3 + 2] = v.z;
+      if (src.attributes.normal) {
+        v.fromBufferAttribute(src.attributes.normal, i).applyMatrix3(nm).normalize();
+        nrm[i * 3] = v.x;
+        nrm[i * 3 + 1] = v.y;
+        nrm[i * 3 + 2] = v.z;
+      }
+      if (src.attributes.uv) {
+        uv[i * 2] = src.attributes.uv.getX(i);
+        uv[i * 2 + 1] = src.attributes.uv.getY(i);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    g.setIndex(src.index ? Array.from(src.index.array) : Array.from({ length: n }, (_, i) => i));
+    // Bucket by material and by 24-unit map chunk so off-screen chunks get culled.
+    const cx = Math.floor((m.matrixWorld.elements[12] + 200) / 24);
+    const cz = Math.floor((m.matrixWorld.elements[14] + 200) / 24);
+    const key = `${m.material.uuid}|${cx}|${cz}`;
+    const entry = byMat.get(key) ?? { mat: m.material, geos: [] };
+    entry.geos.push(g);
+    byMat.set(key, entry);
+  });
+  const out = new THREE.Group();
+  for (const { mat, geos } of byMat.values()) {
+    const merged = mergeGeometries(geos);
+    geos.forEach((g) => g.dispose());
+    if (!merged) continue;
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    out.add(mesh);
+  }
+  return out;
+}
+
 export class World {
   readonly sun: THREE.DirectionalLight;
   readonly roads: Road[];
@@ -71,10 +132,10 @@ export class World {
     sun.castShadow = true;
     sun.shadow.mapSize.set(shadowSize, shadowSize);
     const s = sun.shadow.camera;
-    s.left = s.bottom = -30;
-    s.right = s.top = 30;
+    s.left = s.bottom = -42;
+    s.right = s.top = 42;
     s.near = 1;
-    s.far = 80;
+    s.far = 110;
     sun.shadow.bias = -0.0012;
     sun.shadow.normalBias = 0.04;
     scene.add(sun, sun.target);
@@ -104,39 +165,71 @@ export class World {
     this.roadMeshes[i].visible = on;
   }
 
-  /** Scatter scenery, keeping clear of roads and of the given reserved spots. */
-  decorate(scene: THREE.Scene, reserved: { x: number; z: number; r: number }[]) {
+  /** Scatter KayKit scenery, keeping clear of roads and of the given reserved spots. */
+  decorate(target: THREE.Scene, reserved: { x: number; z: number; r: number }[], assets: Assets) {
     const rng = mulberry32(2024);
+    // Everything static goes into a staging group, then gets merged into a few big meshes.
+    const scene = new THREE.Group();
     const clear = (x: number, z: number, pad: number) => {
-      if (Math.hypot(x, z) < 9 + pad) return false;
-      for (const r of this.roads) if (r.distanceTo(x, z) < ROAD_HALF_WIDTH + 1.6 + pad) return false;
+      if (Math.hypot(x, z) < 8 + pad) return false;
+      for (const r of this.roads) if (r.distanceTo(x, z) < ROAD_HALF_WIDTH + 1.4 + pad) return false;
       for (const q of reserved) if (Math.hypot(x - q.x, z - q.z) < q.r + pad) return false;
       return true;
     };
-    const place = (make: () => THREE.Object3D, n: number, rMin: number, rMax: number, pad: number) => {
+    const add = (name: string, size: number, x: number, z: number, axis: 'y' | 'max' = 'y') => {
+      const o = assets.prop(name, size, axis);
+      o.position.set(x, 0, z);
+      o.rotation.y = rng() * Math.PI * 2;
+      scene.add(o);
+      return o;
+    };
+    const scatter = (names: string[], n: number, rMin: number, rMax: number, pad: number, size: () => number, axis: 'y' | 'max' = 'y') => {
       for (let i = 0; i < n; i++) {
-        for (let tries = 0; tries < 25; tries++) {
+        for (let tries = 0; tries < 30; tries++) {
           const a = rng() * Math.PI * 2;
           const r = rMin + rng() * (rMax - rMin);
           const x = Math.cos(a) * r;
-          const z = Math.sin(a) * r - 10;
-          if (!clear(x, z, pad)) continue;
-          const o = make();
-          o.position.set(x, 0, z);
-          o.rotation.y = rng() * Math.PI * 2;
-          scene.add(o);
+          const z = Math.sin(a) * r - 12;
+          const sz = size();
+          // Big things need clearance proportional to their size.
+          if (!clear(x, z, Math.max(pad, axis === 'max' ? sz * 0.5 : pad))) continue;
+          add(names[Math.floor(rng() * names.length)], sz, x, z, axis);
           break;
         }
       }
     };
-    place(() => makeMesa(rng), 34, 30, 70, 4);
-    place(() => makeMesa(rng), 8, 16, 30, 4.5);
-    place(() => makeCactus(rng), 60, 8, 60, 0.8);
-    place(() => makeBush(rng), 70, 6, 60, 0.6);
-    place(() => makeRock(rng), 60, 6, 60, 0.8);
-    place(() => makeDeadTree(rng), 18, 10, 55, 1);
-    place(() => makeProps(rng), 10, 9, 22, 1.2);
-    this.scatterGround(scene, rng, clear);
+
+    // A ring of forested mountains frames the battlefield.
+    scatter(['mountain_A_grass_trees', 'mountain_B_grass_trees', 'mountain_C_grass_trees'], 40, 62, 92, 6, () => 9 + rng() * 6, 'max');
+    // Forest clumps and lone trees.
+    scatter(['trees_A_large', 'trees_B_large', 'trees_A_medium', 'trees_B_medium'], 70, 10, 55, 2.4, () => 2.6 + rng() * 2.2);
+    scatter(['trees_A_small', 'trees_B_small', 'tree_single_A', 'tree_single_B'], 60, 9, 50, 1.4, () => 1.6 + rng() * 1.6);
+    scatter(['rock_single_A', 'rock_single_B', 'rock_single_C', 'rock_single_D', 'rock_single_E'], 45, 8, 50, 0.8, () => 0.5 + rng() * 0.9, 'max');
+
+    // A little village around the castle.
+    const village: [string, number, number, number][] = [
+      ['building_home_A_blue', -15, 11, 3.6],
+      ['building_home_B_blue', -13.5, 17.5, 3.6],
+      ['building_windmill_blue', -20, 6, 6],
+      ['building_tavern_blue', 15, 16, 4.2],
+      ['building_well_blue', 4.5, 16.5, 2.6],
+      ['building_market_blue', -7, 18, 4],
+      ['building_church_blue', 21, 10, 5.6],
+      ['building_home_A_blue', 8.5, 21, 3.6],
+      ['building_home_B_blue', -2, 22, 3.6],
+      ['tent', -17.5, -9, 2.2],
+    ];
+    for (const [name, x, z, size] of village) {
+      if (!clear(x, z, 1.6)) continue;
+      const o = add(name, size, x, z, 'max');
+      o.rotation.y = Math.atan2(-x, -z) + Math.PI; // face the castle
+      reserved.push({ x, z, r: 3 });
+    }
+    const props = ['barrel', 'crate_A_big', 'crate_B_big', 'sack', 'wheelbarrow', 'resource_lumber', 'crate_long_A'];
+    scatter(props, 26, 8, 24, 0.8, () => 0.8 + rng() * 0.5);
+
+    target.add(bakeStatic(scene));
+    this.scatterGround(target, rng, clear);
 
     // Lanterns along the last stretch of each road.
     for (const road of this.roads) {
@@ -144,64 +237,78 @@ export class World {
         const v = road.point(road.length * t, ROAD_HALF_WIDTH + 0.7, new THREE.Vector3());
         const l = makeLantern();
         l.position.copy(v);
-        scene.add(l);
+        target.add(l);
       }
     }
   }
 
-  /** Thousands of pebbles and dry tufts as two instanced meshes: texture for almost free. */
+  /** Thousands of grass tufts, flowers and pebbles as instanced meshes: texture for almost free. */
   private scatterGround(scene: THREE.Scene, rng: () => number, clear: (x: number, z: number, pad: number) => boolean) {
-    const pebbleGeo = new THREE.DodecahedronGeometry(0.12, 0);
-    const pebbles = new THREE.InstancedMesh(pebbleGeo, MAT.vcFlat, 1800);
     const tuftParts: THREE.BufferGeometry[] = [];
-    for (let i = 0; i < 5; i++) {
-      const blade = new THREE.ConeGeometry(0.045, 0.5, 3);
-      blade.translate(0, 0.25, 0);
-      blade.rotateZ((i - 2) * 0.28);
-      blade.rotateY(i * 1.3);
+    for (let i = 0; i < 6; i++) {
+      const blade = new THREE.ConeGeometry(0.05, 0.55, 3);
+      blade.translate(0, 0.27, 0);
+      blade.rotateZ((i - 2.5) * 0.25);
+      blade.rotateY(i * 1.1);
       tuftParts.push(blade.toNonIndexed());
       blade.dispose();
     }
     const tuftGeo = mergeGeometries(tuftParts)!;
-    const tufts = new THREE.InstancedMesh(tuftGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), 900);
+    const tufts = new THREE.InstancedMesh(tuftGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), 2600);
+    const flowerGeo = new THREE.IcosahedronGeometry(0.09, 0);
+    flowerGeo.translate(0, 0.3, 0);
+    const flowers = new THREE.InstancedMesh(flowerGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }), 900);
+    const pebbleGeo = new THREE.DodecahedronGeometry(0.12, 0);
+    const pebbles = new THREE.InstancedMesh(pebbleGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, flatShading: true }), 700);
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
     const c = new THREE.Color();
-    const pebbleCols = [COLORS.cliffDark, COLORS.cliff, COLORS.sandDark, 0x9c8a78, 0xb98a60];
-    const tuftCols = [0xb8a35a, 0x9e9a4e, 0xc9b26a, 0x8f8a3e];
-    // Pebbles need a colour attribute for the vertex-colour material: give them white and tint per instance.
-    const n = pebbleGeo.attributes.position.count;
-    pebbleGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
-    let pi = 0;
+    const tuftCols = [0x5f9c3a, 0x76b545, 0x8fcb52, 0x4f8a30];
+    const flowerCols = [0xffffff, 0xffe066, 0xff8fb1, 0xb69cff, 0xff6b5b];
+    const pebbleCols = [0xa9a49a, 0x8f8a82, 0xc2bdb2];
     let ti = 0;
-    for (let k = 0; k < 6000 && (pi < 1800 || ti < 900); k++) {
-      const x = (rng() - 0.5) * 120;
-      const z = (rng() - 0.5) * 110 - 12;
-      const onRoadOk = rng() < 0.25; // some pebbles sit on the road edges
-      if (!clear(x, z, -1.2) && !onRoadOk) continue;
-      if (Math.hypot(x, z) < 6) continue;
-      if (pi < 1800 && rng() < 0.7) {
-        const s = 0.5 + rng() * 1.6;
-        q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3));
-        m.compose(new THREE.Vector3(x, 0.03, z), q, new THREE.Vector3(s, s * (0.5 + rng() * 0.4), s));
-        pebbles.setMatrixAt(pi, m);
-        pebbles.setColorAt(pi, c.set(pebbleCols[Math.floor(rng() * pebbleCols.length)]));
-        pi++;
-      } else if (ti < 900 && clear(x, z, 0)) {
+    let fi = 0;
+    let pi = 0;
+    for (let k = 0; k < 14000 && (ti < 2600 || fi < 900 || pi < 700); k++) {
+      const x = (rng() - 0.5) * 130;
+      const z = (rng() - 0.5) * 120 - 12;
+      const roadside = !clear(x, z, -1.5);
+      if (Math.hypot(x, z) < 5) continue;
+      const roll = rng();
+      if (roadside) {
+        // The road gets pebbles only.
+        if (pi < 700 && roll < 0.3) {
+          const s = 0.5 + rng() * 1.2;
+          q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3));
+          m.compose(new THREE.Vector3(x, 0.03, z), q, new THREE.Vector3(s, s * 0.6, s));
+          pebbles.setMatrixAt(pi, m);
+          pebbles.setColorAt(pi++, c.set(pebbleCols[Math.floor(rng() * pebbleCols.length)]));
+        }
+        continue;
+      }
+      if (roll < 0.72 && ti < 2600) {
         const s = 0.6 + rng() * 0.9;
         q.setFromEuler(e.set(0, rng() * 6, 0));
         m.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(s, s, s));
         tufts.setMatrixAt(ti, m);
-        tufts.setColorAt(ti, c.set(tuftCols[Math.floor(rng() * tuftCols.length)]));
-        ti++;
+        tufts.setColorAt(ti++, c.set(tuftCols[Math.floor(rng() * tuftCols.length)]));
+      } else if (fi < 900) {
+        // Flowers grow in little patches.
+        const col = flowerCols[Math.floor(rng() * flowerCols.length)];
+        for (let j = 0; j < 4 && fi < 900; j++) {
+          const s = 0.8 + rng() * 0.6;
+          m.compose(new THREE.Vector3(x + (rng() - 0.5) * 0.9, 0, z + (rng() - 0.5) * 0.9), q.identity(), new THREE.Vector3(s, s, s));
+          flowers.setMatrixAt(fi, m);
+          flowers.setColorAt(fi++, c.set(col));
+        }
       }
     }
-    pebbles.count = pi;
     tufts.count = ti;
+    flowers.count = fi;
+    pebbles.count = pi;
     pebbles.receiveShadow = true;
-    tufts.castShadow = false;
-    scene.add(pebbles, tufts);
+    scene.add(tufts, flowers, pebbles);
   }
 
   update(focus: THREE.Vector3) {

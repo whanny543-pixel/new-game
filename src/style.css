@@ -801,3 +801,10 @@ h2 {
 .perk.epic .perk-tag {
   color: #e2b8ff;
 }
+
+.credit {
+  margin: 10px 0 0;
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  color: rgba(241, 227, 196, 0.55);
+}

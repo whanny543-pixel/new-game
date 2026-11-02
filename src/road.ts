@@ -81,10 +81,9 @@ export class Road {
     const idx: number[] = [];
     const edge = new THREE.Color(COLORS.roadEdge);
     const mid = new THREE.Color(COLORS.road);
-    const sand = new THREE.Color(COLORS.sand);
     // Five strips across: sand-blend | edge | centre | edge | sand-blend.
     const offsets = [-ROAD_HALF_WIDTH - 0.9, -ROAD_HALF_WIDTH, 0, ROAD_HALF_WIDTH, ROAD_HALF_WIDTH + 0.9];
-    const colors = [sand, edge, mid, edge, sand];
+    const colors = [edge, edge, mid, edge, edge];
     const v = new THREE.Vector3();
     for (let i = 0; i < n; i++) {
       for (let k = 0; k < offsets.length; k++) {
@@ -93,7 +92,12 @@ export class Road {
         const c = colors[k];
         // Slight wobble in tone along the road so it doesn't look painted on.
         const j = 1 + Math.sin(i * 0.37 + k) * 0.03;
-        col.push(c.r * j, c.g * j, c.b * j);
+        // Outer strips fade to transparent so the road melts into the grass.
+        // …and both ends fade out instead of stopping with a hard edge.
+        const fromEnd = Math.min(this.cum[i], this.length - this.cum[i]);
+        const endFade = Math.min(1, fromEnd / 3.5);
+        const alpha = (k === 0 || k === offsets.length - 1 ? 0 : 1) * endFade;
+        col.push(c.r * j, c.g * j, c.b * j, alpha);
       }
     }
     const w = offsets.length;
@@ -108,10 +112,10 @@ export class Road {
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, detailize(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 0.5, 1.1));
+    const m = new THREE.Mesh(g, detailize(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, transparent: true, depthWrite: false }), 0.5, 1.1));
     m.receiveShadow = true;
     return m;
   }

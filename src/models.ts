@@ -33,6 +33,9 @@ export const MAT = {
   fire: new THREE.MeshStandardMaterial({ color: COLORS.fire, emissive: COLORS.fire, emissiveIntensity: 5 }),
   white: new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.55, roughness: 0.35 }),
   shadow: new THREE.MeshBasicMaterial({ color: 0x3a1d05, transparent: true, opacity: 0.26, depthWrite: false }),
+  arrowModel: new THREE.MeshStandardMaterial({ color: 0xd9b27a, roughness: 0.6 }),
+  /** HDR colour so the bolts bloom. */
+  magic: new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 2.6, 3.4) }),
   glowRing: new THREE.MeshBasicMaterial({
     color: 0xffd86b,
     transparent: true,
@@ -115,7 +118,9 @@ export class Kit {
   }
 }
 
-export const GEO = {
+/** Shared geometries (some are swapped for KayKit models once assets load). */
+const asGeo = <T extends Record<string, THREE.BufferGeometry>>(o: T) => o as { [K in keyof T]: THREE.BufferGeometry };
+export const GEO = asGeo({
   coin: new THREE.CylinderGeometry(0.24, 0.24, 0.1, 12),
   arrow: new THREE.CylinderGeometry(0.035, 0.035, 0.75, 4).rotateX(Math.PI / 2),
   bolt: new THREE.CylinderGeometry(0.08, 0.08, 1.4, 5).rotateX(Math.PI / 2),
@@ -126,9 +131,10 @@ export const GEO = {
   blobShadow: new THREE.CircleGeometry(1, 20),
   dot: new THREE.CircleGeometry(0.12, 10),
   ring: new THREE.RingGeometry(0.85, 1, 32),
+  orb: new THREE.IcosahedronGeometry(0.2, 2),
   sword: swordGeometry(),
   bow: bowGeometry(),
-};
+});
 
 /** A gabled roof sitting on eaves at height `y`: width across (z), ridge length along x, then yawed. */
 function gable(k: Kit, w: number, h: number, d: number, color: number, x: number, y: number, z: number, ry = 0) {

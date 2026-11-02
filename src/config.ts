@@ -1,13 +1,14 @@
 // All gameplay tuning lives here so balancing never requires touching game logic.
 
 export const COLORS = {
-  sky: 0xf2c38b,
-  fog: 0xe9b57a,
-  sand: 0xebc07f,
-  sandDark: 0xd9a865,
-  sandLight: 0xf5d49c,
-  road: 0x8f5532,
-  roadEdge: 0xa86c40,
+  sky: 0x9fd4f2,
+  fog: 0xb8e0f0,
+  /** Ground (meadow grass); the name stays for the road edge blend. */
+  sand: 0x79b84a,
+  sandDark: 0x5f9c3a,
+  sandLight: 0x98d05c,
+  road: 0xb07a4a,
+  roadEdge: 0xc29262,
   cliff: 0xd58a56,
   cliffDark: 0xb46a3d,
   cliffLight: 0xe7a46d,
@@ -60,16 +61,17 @@ export const HALL = { maxHp: 1200, regen: 3, radius: 3.4 };
 
 /** Weapon tiers: 0 is what a fresh recruit carries; forge/bowyer levels make 1..3. */
 export const SWORD_TIERS = [
-  { name: 'Club', damage: 9, color: 0x6a4122 },
-  { name: 'Iron Sword', damage: 17, color: 0xcfd6e0 },
-  { name: 'Steel Sword', damage: 28, color: 0x8fd3ff },
-  { name: 'Gold Sword', damage: 44, color: 0xffc928 },
+  // Colours tint the KayKit textures (white = untinted).
+  { name: 'Rusty Sword', damage: 9, color: 0x9c8a74 },
+  { name: 'Iron Sword', damage: 17, color: 0xffffff },
+  { name: 'Steel Sword', damage: 28, color: 0x8fd0ff },
+  { name: 'Gold Sword', damage: 44, color: 0xffcf3d },
 ];
 export const BOW_TIERS = [
-  { name: 'Shortbow', damage: 14, color: 0x8a5a33 },
-  { name: 'Longbow', damage: 23, color: 0x5e3b20 },
-  { name: 'Recurve Bow', damage: 35, color: 0x2f6fd6 },
-  { name: 'Gold Bow', damage: 52, color: 0xffc928 },
+  { name: 'Old Crossbow', damage: 14, color: 0x9c8a74 },
+  { name: 'Crossbow', damage: 23, color: 0xffffff },
+  { name: 'Heavy Crossbow', damage: 35, color: 0x8fd0ff },
+  { name: 'Gold Crossbow', damage: 52, color: 0xffcf3d },
 ];
 
 export const ARCHER = { range: 9.5, delay: 0.6 };
@@ -127,7 +129,7 @@ export const ROADS: [number, number][][] = [
     [9, -21],
     [12, -13],
     [5, -7.5],
-    [3.6, -3.4],
+    [3.0, -2.6],
   ],
   [
     [44, -12],

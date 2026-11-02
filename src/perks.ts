@@ -71,7 +71,7 @@ export const PERKS: Perk[] = [
   {
     id: 'chain',
     name: 'Storm Bolts',
-    desc: (l) => `Hits arc lightning to ${l * 2 + 2} goblins`,
+    desc: (l) => `Hits arc lightning to ${l * 2 + 2} enemies`,
     rarity: 'epic',
     max: 4,
     icon: 'M14 2 6 13h5l-2 9 9-12h-5z',
@@ -80,7 +80,7 @@ export const PERKS: Perk[] = [
   {
     id: 'splash',
     name: 'Fire Arrows',
-    desc: () => 'Hits explode, burning goblins nearby',
+    desc: () => 'Hits explode, burning nearby enemies',
     rarity: 'rare',
     max: 4,
     icon: 'M12 2c3 4 6 6 6 11a6 6 0 0 1-12 0c0-3 2-5 3-7 1 2 2 3 3 3 0-3-1-5 0-7z',

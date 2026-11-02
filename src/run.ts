@@ -24,6 +24,8 @@ import {
   type PlotDef,
 } from './config';
 import * as M from './models';
+import * as S from './structures';
+import type { Horde } from './horde';
 import { Plot } from './plot';
 import { BASE_STATS, xpForLevel, type HeroStats, type Perk } from './perks';
 import type { Fx } from './fx';
@@ -65,11 +67,16 @@ interface Enemy {
   phase: number;
   moving: boolean;
   bar: HTMLElement | null;
+  /** Seconds left rising out of the ground. */
+  spawnT: number;
+  /** Seconds since death (death animation), -1 while alive. */
+  deadT: number;
+  animT: number;
 }
 
 interface Unit {
   type: UnitType;
-  rig: M.UnitRig;
+  rig: S.UnitRig;
   pos: THREE.Vector3;
   tier: number;
   state: 'follow' | 'walk' | 'station';
@@ -88,7 +95,7 @@ interface Unit {
 interface Tower {
   plot: Plot;
   pos: THREE.Vector3;
-  rig: M.TowerRig;
+  rig: S.TowerRig;
   level: number;
   units: (Unit | null)[];
   ballistaCd: number;
@@ -102,7 +109,7 @@ interface Post {
   s: number;
   level: number;
   units: (Unit | null)[];
-  flag: THREE.Mesh;
+  flag: THREE.Object3D;
   pos: THREE.Vector3;
   label: HTMLElement;
 }
@@ -114,7 +121,7 @@ interface Barricade {
   hp: number;
   maxHp: number;
   alive: boolean;
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D;
   pos: THREE.Vector3;
   lastHit: number;
   shake: number;
@@ -124,7 +131,7 @@ interface Barricade {
 interface Workshop {
   plot: Plot;
   kind: 'range' | 'barracks' | 'forge' | 'bowyer';
-  rig: M.WorkshopRig;
+  rig: S.WorkshopRig;
   pos: THREE.Vector3;
   level: number;
   timer: number;
@@ -147,7 +154,7 @@ interface Arrow {
 }
 
 interface Bolt {
-  mesh: THREE.Mesh;
+  mesh: THREE.Object3D;
   pos: THREE.Vector3;
   dir: THREE.Vector3;
   left: number;
@@ -187,7 +194,7 @@ export interface RunEvents {
   flash(amount: number): void;
 }
 
-const MAX_ENEMIES: Record<EnemyKind, number> = { goblin: 420, runner: 220, troll: 24 };
+export const MAX_ENEMIES: Record<EnemyKind, number> = { goblin: 420, runner: 220, troll: 24 };
 
 export class Run {
   readonly root = new THREE.Group();
@@ -196,7 +203,7 @@ export class Run {
   over = false;
 
   // Hero
-  hero = M.makeHero();
+  hero = S.makeHero();
   heroPos = new THREE.Vector3(0, 0, 5.5);
   heroVel = new THREE.Vector3();
   heroFacing = Math.PI;
@@ -233,13 +240,14 @@ export class Run {
   private giveT = 0;
 
   // Hall
-  hall = M.makeHall();
+  hall = S.makeHall();
   hallHp = HALL.maxHp;
   private hallLastHit = -99;
 
   // Enemies
   enemies: Enemy[] = [];
-  private crowd: Record<EnemyKind, THREE.InstancedMesh>;
+  /** Recently killed enemies still playing their death animation. */
+  private corpses: Enemy[] = [];
   private grid = new Map<number, Enemy[]>();
 
   // Defence
@@ -276,6 +284,7 @@ export class Run {
     private sfx: Sfx,
     private hud: Hud,
     private events: RunEvents,
+    private horde: Horde,
   ) {
     scene.add(this.root);
     world.openRoad(1, false);
@@ -293,26 +302,14 @@ export class Run {
     this.bowStack = this.makeItemStack(M.GEO.bow);
     this.heroBar = hud.worldBar('hero');
 
-    const mk = (kind: EnemyKind) => {
-      const im = new THREE.InstancedMesh(M.enemyGeometry(kind), M.MAT.vc, MAX_ENEMIES[kind]);
-      im.count = 0;
-      im.castShadow = true;
-      im.frustumCulled = false;
-      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      im.setColorAt(0, col.setRGB(1, 1, 1));
-      this.root.add(im);
-      return im;
-    };
-    this.crowd = { goblin: mk('goblin'), runner: mk('runner'), troll: mk('troll') };
-
     for (let i = 0; i < 220; i++) {
-      const mesh = new THREE.Mesh(M.GEO.arrow, M.MAT.arrow);
+      const mesh = new THREE.Mesh(M.GEO.arrow, M.MAT.arrowModel);
       mesh.visible = false;
       this.root.add(mesh);
       this.arrows.push({ hero: false, crit: false, mesh, pos: new THREE.Vector3(), target: null, aim: new THREE.Vector3(), damage: 0, active: false });
     }
     for (let i = 0; i < 16; i++) {
-      const mesh = new THREE.Mesh(M.GEO.bolt, M.MAT.bolt);
+      const mesh = S.prop('projectile_catapult', 0.9);
       mesh.visible = false;
       this.root.add(mesh);
       this.bolts.push({ mesh, pos: new THREE.Vector3(), dir: new THREE.Vector3(), left: 0, hits: new Set(), active: false });
@@ -376,7 +373,7 @@ export class Run {
       }
       const after = SHOP_PAD_AFTER[p.def.id];
       if (after) out.push({ x: after.x, z: after.z, r: 3 });
-      if (p.def.kind in SHOP_MAKERS) out.push({ x: p.pos.x, z: p.pos.z, r: 5 });
+      if (['range', 'barracks', 'forge', 'bowyer'].includes(p.def.kind)) out.push({ x: p.pos.x, z: p.pos.z, r: 5 });
     }
     return out;
   }
@@ -389,7 +386,7 @@ export class Run {
   // ------------------------------------------------------------------ small utilities
 
   private makeItemStack(geo: THREE.BufferGeometry) {
-    const im = new THREE.InstancedMesh(geo, M.MAT.white, PLAYER.maxWeapons);
+    const im = new THREE.InstancedMesh(geo, S.weaponItemMaterial(), PLAYER.maxWeapons);
     im.count = 0;
     im.castShadow = true;
     im.frustumCulled = false;
@@ -462,7 +459,7 @@ export class Run {
     this.updateHall(dt);
     this.updateGuide();
     this.updateStacks(dt);
-    this.drawCrowd();
+    this.drawCrowd(dt);
     this.hud.setGold(this.carry);
     if (!this.chests.some((c) => c.open === 0)) this.hud.hint(this.currentHint());
     if (this.time - this.lastKill > 2.2 && this.combo) {
@@ -533,6 +530,7 @@ export class Run {
           t = this.nearestExcept(this.heroPos.x, this.heroPos.z, PLAYER.range, hit);
         }
         this.fx.p.muzzle(v1);
+        if (!moving) rig.char.once('Spellcast_Shoot', 2.2);
         this.sfx.shoot();
       }
     }
@@ -540,15 +538,11 @@ export class Run {
 
     rig.root.position.copy(this.heroPos);
     rig.root.rotation.y = this.heroFacing;
-    const sw = Math.sin(this.walkT);
-    rig.legL.position.z = sw * 0.16;
-    rig.legR.position.z = -sw * 0.16;
-    rig.body.position.y = Math.abs(sw) * 0.06;
-    rig.body.rotation.z = sw * 0.04;
+    rig.char.loop(moving ? 'Running_A' : 'Idle');
+    rig.char.update(dt);
 
     if (this.time - this.heroLastHit > 3) this.heroHp = Math.min(this.stats.maxHp, this.heroHp + PLAYER.regen * dt);
     this.heroHurt = Math.max(0, this.heroHurt - dt * 4);
-    M.MAT.team.emissive.setRGB(this.heroHurt * 0.8, 0, 0);
     const frac = this.heroHp / this.stats.maxHp;
     this.hud.placeBar(this.heroBar, frac < 0.999 ? v1.copy(this.heroPos).setY(2.7) : null, frac);
   }
@@ -689,7 +683,7 @@ export class Run {
     if (n >= WAVES.roadBWave && !this.roadBOpen) {
       this.roadBOpen = true;
       this.world.openRoad(1, true);
-      this.hud.banner('Goblins on the east road!', true);
+      this.hud.banner('Skeletons on the east road!', true);
       this.sfx.boss();
     }
     const total = WAVES.baseCount + (n - 1) * WAVES.countPerWave;
@@ -718,7 +712,7 @@ export class Run {
     this.waveTotal = items.length;
     this.waveSpawned = 0;
     if (trolls) {
-      this.hud.banner(`Wave ${n}: Troll!`, true);
+      this.hud.banner(`Wave ${n}: Bone Giant!`, true);
       this.sfx.boss();
     } else if (!(n === WAVES.roadBWave)) {
       this.hud.banner(`Wave ${n}`, false);
@@ -748,6 +742,9 @@ export class Run {
       phase: Math.random() * 10,
       moving: true,
       bar: type.boss ? this.hud.worldBar('enemy big') : null,
+      spawnT: this.horde.duration(kind, 'spawn') / 1.6,
+      deadT: -1,
+      animT: Math.random(),
     };
     this.roads[road].point(e.s, e.off, v1);
     e.x = v1.x;
@@ -794,6 +791,17 @@ export class Run {
       e.atkCd -= dt;
       e.lunge = Math.max(0, e.lunge - dt * 4);
       e.flash = Math.max(0, e.flash - dt * 7);
+      if (e.spawnT > 0) {
+        // Clawing up out of the ground.
+        e.spawnT -= dt;
+        if (Math.random() < dt * 10) this.fx.p.dust(v1.set(e.x, 0.1, e.z), 1);
+        road.point(e.s, e.off, v1);
+        e.x = v1.x;
+        e.z = v1.z;
+        road.tangent(e.s, v2);
+        e.facing = Math.atan2(v2.x, v2.z);
+        continue;
+      }
 
       let blocked = false;
       let attack: (() => void) | null = null;
@@ -906,27 +914,37 @@ export class Run {
     }
   }
 
-  private drawCrowd() {
-    const counts: Record<EnemyKind, number> = { goblin: 0, runner: 0, troll: 0 };
+  private drawCrowd(dt: number) {
+    const h = this.horde;
+    h.begin();
     for (const e of this.enemies) {
-      const im = this.crowd[e.kind];
-      const i = counts[e.kind]++;
-      const hop = e.moving ? Math.abs(Math.sin(this.time * (e.type.boss ? 5 : 12) + e.phase)) : 0;
-      const sq = 1 + e.flash * 0.18;
-      const fwd = e.lunge * (e.type.boss ? 0.5 : 0.3);
-      v1.set(e.x + Math.sin(e.facing) * fwd, hop * (e.type.boss ? 0.12 : 0.2), e.z + Math.cos(e.facing) * fwd);
-      quat.setFromEuler(eul.set(e.lunge * 0.35, e.facing, Math.sin(this.time * 12 + e.phase) * 0.08 * (e.moving ? 1 : 0), 'YXZ'));
-      mtx.compose(v1, quat, scl.set(sq, 1 / sq + hop * 0.06, sq));
-      im.setMatrixAt(i, mtx);
-      const b = 1 + e.flash * 1.6;
-      im.setColorAt(i, col.setRGB(b, b, b));
+      const boss = e.type.boss;
+      const bright = 1 + e.flash * 1.8;
+      const size = 1 + e.flash * 0.08;
+      const fwd = e.lunge * (boss ? 0.4 : 0.2);
+      const x = e.x + Math.sin(e.facing) * fwd;
+      const z = e.z + Math.cos(e.facing) * fwd;
+      if (e.spawnT > 0) {
+        const dur = h.duration(e.kind, 'spawn');
+        h.add(e.kind, 'spawn', dur - e.spawnT * 1.6, x, 0, z, e.facing, 0, size, bright);
+      } else if (!e.moving) {
+        e.animT += dt;
+        h.add(e.kind, 'attack', e.animT * 1.3, x, 0, z, e.facing, 0, size, bright);
+      } else {
+        // Walk cycle speed follows movement speed.
+        e.animT += dt * (e.kind === 'runner' ? 1.15 : boss ? 0.8 : 1.25);
+        h.add(e.kind, 'move', e.animT, x, 0, z, e.facing, 0, size, bright);
+      }
     }
-    for (const kind of ['goblin', 'runner', 'troll'] as EnemyKind[]) {
-      const im = this.crowd[kind];
-      im.count = counts[kind];
-      im.instanceMatrix.needsUpdate = true;
-      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    for (let i = this.corpses.length - 1; i >= 0; i--) {
+      const c = this.corpses[i];
+      c.deadT += dt;
+      const dur = h.duration(c.kind, 'death');
+      const sink = Math.max(0, c.deadT * 1.3 - dur * 1.3) * 0.8;
+      h.add(c.kind, 'death', c.deadT * 1.3, c.x, -sink, c.z, c.facing, 0, 1, 1);
+      if (c.deadT * 1.3 > dur + 0.9) this.corpses.splice(i, 1);
     }
+    h.end();
   }
 
   private hitEnemy(e: Enemy, dmg: number, crit = false) {
@@ -945,6 +963,8 @@ export class Run {
 
   private killEnemy(e: Enemy) {
     e.alive = false;
+    e.deadT = 0;
+    if (this.corpses.length < 160) this.corpses.push(e);
     this.kills++;
     v1.set(e.x, 0.8, e.z);
     this.fx.p.death(v1, e.kind === 'troll' ? COLORS.troll : COLORS.goblin, e.type.boss);
@@ -986,7 +1006,7 @@ export class Run {
       this.events.haptic(true);
       this.events.flash(0.6);
       this.fx.ring(v1, 0xffffff, 6, 0.5);
-      this.hud.banner('Troll slain!', false);
+      this.hud.banner('Giant smashed!', false);
       this.spawnChest(v1);
     }
   }
@@ -995,20 +1015,9 @@ export class Run {
 
   private spawnChest(at: THREE.Vector3) {
     const root = new THREE.Group();
-    const k = new M.Kit();
-    k.box(1.1, 0.6, 0.75, COLORS.wood, 0, 0.3, 0);
-    k.box(1.16, 0.1, 0.8, COLORS.coin, 0, 0.12, 0);
-    k.box(1.16, 0.1, 0.8, COLORS.coin, 0, 0.52, 0);
-    k.box(0.12, 0.64, 0.8, COLORS.coin, -0.45, 0.32, 0);
-    k.box(0.12, 0.64, 0.8, COLORS.coin, 0.45, 0.32, 0);
-    root.add(k.mesh());
-    const lid = new THREE.Group();
-    const lk = new M.Kit();
-    lk.add(new THREE.CylinderGeometry(0.38, 0.38, 1.1, 12, 1, false, 0, Math.PI), COLORS.woodLight, 0, 0, 0.38, 0, 0, Math.PI / 2);
-    lk.box(0.14, 0.12, 0.2, COLORS.coin, 0, 0.0, 0.78);
-    lid.add(lk.mesh());
-    lid.position.set(0, 0.6, -0.38);
-    root.add(lid);
+    const chest = S.makeChest();
+    root.add(chest.root);
+    const lid = chest.lid;
     const beam = new THREE.Mesh(
       new THREE.CylinderGeometry(0.5, 0.9, 7, 16, 1, true).translate(0, 3.5, 0),
       new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }),
@@ -1049,7 +1058,7 @@ export class Run {
         }
       } else {
         c.open += dt;
-        c.lid.rotation.x = -Math.min(1, c.open * 4) * 1.9;
+        c.lid.rotation.x = -Math.min(1, c.open * 4) * 1.6;
         (c.beam.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.3 - c.open * 0.3);
         if (c.open > 2.5) {
           c.root.scale.setScalar(Math.max(0.01, 1 - (c.open - 2.5) * 3));
@@ -1075,6 +1084,9 @@ export class Run {
     a.active = true;
     a.hero = hero;
     a.crit = crit;
+    a.mesh.geometry = hero ? M.GEO.orb : M.GEO.arrow;
+    a.mesh.material = hero ? M.MAT.magic : M.MAT.arrowModel;
+    a.mesh.scale.setScalar(hero && crit ? 1.6 : 1);
     a.mesh.visible = true;
     a.pos.copy(from);
     a.target = target;
@@ -1309,7 +1321,7 @@ export class Run {
     const def = p.def;
     let t = this.towers.get(def.id);
     if (!t) {
-      const rig = M.makeTower();
+      const rig = S.makeTower();
       const pos = this.resolve(def.place);
       rig.root.position.copy(pos);
       // Face the road.
@@ -1329,6 +1341,8 @@ export class Run {
       t.level = Math.min(TOWER_LEVELS.length - 1, lvl);
       t.rig.roof.visible = t.level >= 1;
       t.rig.ballista.visible = TOWER_LEVELS[t.level].ballista;
+      t.rig.base.visible = !TOWER_LEVELS[t.level].ballista;
+      if (TOWER_LEVELS[t.level].ballista) t.rig.roof.visible = false;
       t.grow = 0.4;
       this.fx.text(v2.copy(t.pos).setY(4), TOWER_LEVELS[t.level].ballista ? 'Ballista mounted!' : '+1 archer slot', 'good');
     }
@@ -1341,7 +1355,7 @@ export class Run {
       const pl = def.place as { road: number; t: number };
       const road = this.roads[pl.road];
       const s = road.length * pl.t;
-      const flag = M.makePostFlag();
+      const flag = S.makePostFlag();
       const pos = road.point(s, ROAD_HALF_WIDTH + 0.7, new THREE.Vector3());
       flag.position.copy(pos);
       this.root.add(flag);
@@ -1361,7 +1375,7 @@ export class Run {
       const pl = def.place as { road: number; t: number };
       const road = this.roads[pl.road];
       const s = road.length * pl.t;
-      const mesh = M.makeBarricade(ROAD_HALF_WIDTH * 2 + 0.6);
+      const mesh = S.makeBarricade(ROAD_HALF_WIDTH * 2 + 0.6);
       const pos = road.point(s, 0, new THREE.Vector3());
       mesh.position.copy(pos);
       road.tangent(s, v2);
@@ -1381,14 +1395,14 @@ export class Run {
   private buildShop(p: Plot, kind: Workshop['kind'], lvl: number) {
     let shop = this.shops.get(p.def.id);
     if (!shop) {
-      const rig = SHOP_MAKERS[kind]();
+      const rig = S.makeShop(kind);
       const pos = p.pos.clone();
       rig.root.position.copy(pos);
       this.root.add(rig.root);
       let rackMesh: THREE.InstancedMesh | null = null;
       const rackWorld = rig.rack.clone().add(pos);
       if (kind === 'forge' || kind === 'bowyer') {
-        rackMesh = new THREE.InstancedMesh(kind === 'forge' ? M.GEO.sword : M.GEO.bow, M.MAT.white, WORKSHOP.rackMax);
+        rackMesh = new THREE.InstancedMesh(kind === 'forge' ? M.GEO.sword : M.GEO.bow, S.weaponItemMaterial(), WORKSHOP.rackMax);
         rackMesh.count = 0;
         rackMesh.castShadow = true;
         rackMesh.frustumCulled = false;
@@ -1412,7 +1426,7 @@ export class Run {
   // ------------------------------------------------------------------ defenders
 
   private spawnUnit(type: UnitType, at: THREE.Vector3, state: Unit['state'], home?: Tower) {
-    const rig = type === 'archer' ? M.makeArcher() : M.makeKnight();
+    const rig = S.makeUnit(type);
     const pos = at.clone().setY(0);
     rig.root.position.copy(pos);
     this.root.add(rig.root);
@@ -1566,6 +1580,7 @@ export class Run {
           face = Math.atan2(t.x - u.pos.x, t.z - u.pos.z);
           if (u.cd <= 0 && u.state !== 'walk') {
             u.cd = ARCHER.delay;
+            u.swing = 1;
             u.rig.muzzle.getWorldPosition(v2);
             this.fire(v2, t, Math.round(BOW_TIERS[u.tier].damage * this.stats.allies));
             this.sfx.turret();
@@ -1592,8 +1607,9 @@ export class Run {
 
       u.rig.root.position.copy(u.pos);
       u.rig.root.rotation.y = u.facing;
-      u.rig.body.position.y = walking ? Math.abs(Math.sin(this.time * 14 + fi)) * 0.12 : 0;
-      if (u.type === 'knight') u.rig.weapon.rotation.x = 0.9 - u.swing * 1.8;
+      u.rig.char.loop(walking ? 'Running_A' : 'Idle');
+      if (u.swing === 1) u.rig.char.once(u.type === 'archer' ? '1H_Ranged_Shoot' : '1H_Melee_Attack_Chop', 1.6);
+      u.rig.char.update(dt);
     }
 
     // Remove the fallen.
@@ -1637,18 +1653,15 @@ export class Run {
 
       const manned = t.units.filter((u) => u && u.state === 'station').length;
       const slots = TOWER_LEVELS[t.level].slots;
-      this.hud.placeLabel(t.label, v1.copy(t.pos).setY(4.6), `${t.units.filter(Boolean).length}/${slots}`, manned === 0);
+      this.hud.placeLabel(t.label, v1.copy(t.pos).setY(TOWER_LEVELS[t.level].ballista ? 7.2 : 6), `${t.units.filter(Boolean).length}/${slots}`, manned === 0);
 
       if (TOWER_LEVELS[t.level].ballista) {
         t.ballistaCd -= dt;
         const target = this.nearestEnemy(t.pos.x, t.pos.z, BALLISTA.range);
         if (target) {
-          const want = Math.atan2(target.x - t.pos.x, target.z - t.pos.z) - t.rig.root.rotation.y;
-          t.rig.ballista.rotation.y = lerpAngle(t.rig.ballista.rotation.y, want, Math.min(1, dt * 8));
           if (t.ballistaCd <= 0) {
             t.ballistaCd = BALLISTA.delay;
-            t.rig.ballista.getWorldPosition(v1);
-            v1.y += 0.5;
+            v1.copy(t.pos).setY(5.2);
             this.fireBolt(v1, v2.set(target.x, 0.9, target.z));
             this.sfx.boom();
           }
@@ -1872,7 +1885,7 @@ export class Run {
   private currentHint() {
     if (!this.heroAlive) return `Back in ${Math.ceil(this.respawnT)}…`;
     const built = (id: string) => this.isBuilt(id);
-    if (!built('tw1')) return this.carry < 5 ? 'Defeat goblins and grab their gold' : 'Stand on the plot to build a watchtower';
+    if (!built('tw1')) return this.carry < 5 ? 'Defeat skeletons and grab their gold' : 'Stand on the plot to build a watchtower';
     const followers = this.units.filter((u) => u.state === 'follow');
     if (followers.some((u) => u.type === 'archer') && [...this.towers.values()].some((t) => this.freeSlot(t) >= 0))
       return 'Lead your archer to an empty watchtower';
@@ -1885,13 +1898,13 @@ export class Run {
     if (built('barracks') && !this.units.some((u) => u.type === 'knight')) return 'Recruit knights to hold the road';
     if (this.weapons.length) {
       const k = this.weapons[this.weapons.length - 1].kind;
-      return k === 'sword' ? 'Walk up to your knights to hand over swords' : 'Walk up to your archers to hand over bows';
+      return k === 'sword' ? 'Walk up to your knights to hand over swords' : 'Walk up to your archers to hand over crossbows';
     }
     for (const s of this.shops.values()) {
       if (!s.rack.length) continue;
       const type = s.kind === 'forge' ? 'knight' : 'archer';
       if (this.units.some((u) => u.type === type && u.tier < Math.max(...s.rack)))
-        return s.kind === 'forge' ? 'Swords are ready at the Forge' : 'Bows are ready at the Bowyer';
+        return s.kind === 'forge' ? 'Swords are ready at the Forge' : 'Crossbows are ready at the Bowyer';
     }
     return '';
   }
@@ -1904,23 +1917,16 @@ export class Run {
     for (const e of this.enemies) if (e.bar) this.hud.removeBar(e.bar);
     for (const u of this.units) u.rig.weaponMat.dispose();
     this.hud.removeBar(this.heroBar);
-    for (const im of Object.values(this.crowd)) im.geometry.dispose();
-    M.MAT.team.emissive.setRGB(0, 0, 0);
+    this.horde.begin();
+    this.horde.end();
   }
 }
-
-const SHOP_MAKERS: Record<Workshop['kind'], () => M.WorkshopRig> = {
-  range: M.makeRange,
-  barracks: M.makeBarracks,
-  forge: M.makeForge,
-  bowyer: M.makeBowyer,
-};
 
 const SHOP_NAMES: Record<Workshop['kind'], string> = {
   range: 'Archery Range!',
   barracks: 'Barracks!',
   forge: 'Forge! Making Iron Swords',
-  bowyer: 'Bowyer! Making Longbows',
+  bowyer: 'Bowyer! Making Crossbows',
 };
 
 /** After the first build, upgrade pads for workshops move beside the building. */

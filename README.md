@@ -2,7 +2,7 @@
 
 A portrait, one-thumb medieval road-defense game for iOS and Android.
 
-Goblin hordes march down winding desert roads toward your town hall. Your hero shoots on their own, and gold from fallen goblins stacks up on their back. Spend it by standing on build plots.
+Skeleton hordes march down winding roads toward your castle. Your hero shoots on their own, and gold from fallen goblins stacks up on their back. Spend it by standing on build plots.
 
 **The defense loop**
 - **Watchtowers** sit beside the road. They're empty when built: recruit archers at the **Archery Range** and lead them to a free tower. Upgrades add a second archer slot, then a ballista.
@@ -15,7 +15,9 @@ Goblin hordes march down winding desert roads toward your town hall. Your hero s
 
 A dotted trail always points to the most useful next step, and a hint line at the bottom explains it.
 
-Built with Three.js and TypeScript (Vite), and packaged for the app stores with Capacitor. All models and sounds are generated in code, so there are no asset files to license.
+Built with Three.js and TypeScript (Vite), and packaged for the app stores with Capacitor.
+
+**Art:** 3D models are from the KayKit packs by Kay Lousberg (www.kaylousberg.com), released under CC0, so they're free for commercial use with no attribution required (credited on the title screen anyway). The packs used are Character Pack: Adventurers, Character Pack: Skeletons, Medieval Hexagon Pack and Dungeon Remastered. Sound effects are synthesized in code.
 
 ## Run in a browser
 
@@ -39,6 +41,20 @@ Before submitting to the stores:
 - Replace the default app icons and splash screens. `npx @capacitor/assets generate` creates every size from one 1024×1024 icon.
 - Sign the builds with your Apple Developer and Google Play accounts.
 
+## Rebuilding the 3D assets
+
+The processed models live in `src/assets/models` (about 3 MB total). To regenerate them from the original packs:
+
+```bash
+git clone --depth 1 https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0
+git clone --depth 1 https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Skeletons-1.0
+git clone --depth 1 https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexagon-Pack-1.0
+git clone --depth 1 https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0
+node tools/build-assets.mjs <folder with those clones>
+```
+
+The script keeps only the animations the game uses, bundles all static models into `props.glb`, and meshopt-compresses everything.
+
 ## Where things live
 
 | File | What it does |
@@ -46,8 +62,11 @@ Before submitting to the stores:
 | `src/config.ts` | All balancing: costs, damage, weapon tiers, waves, roads, plot layout |
 | `src/run.ts` | Gameplay: hero, horde, defenders, workshops, waves, economy, hints |
 | `src/road.ts` | Road curves the horde walks along |
-| `src/models.ts` | Procedural low-poly models (instanced horde, merged buildings) |
-| `src/world.ts` | Desert terrain, roads, scenery, lighting |
+| `src/assets.ts` | Loads the KayKit models; animated character rigs |
+| `src/horde.ts` | Bakes skeleton animations into instanced poses so hundreds of enemies stay cheap |
+| `src/structures.ts` | Towers, castle, workshops, hero and troops built from the models |
+| `src/models.ts` | Shared materials, small procedural bits (coins, particles, lanterns) |
+| `src/world.ts` | Meadow terrain, roads, scenery (merged into chunks), lighting |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
 | `src/perks.ts` | Level-up perk deck |
 | `src/render.ts` | Post-processing: bloom, colour grade, vignette, adaptive quality |
