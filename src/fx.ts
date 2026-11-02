@@ -9,6 +9,8 @@ interface Particle {
   life: number;
   maxLife: number;
   size: number;
+  gravity: number;
+  grow: number;
   active: boolean;
 }
 
@@ -47,7 +49,7 @@ export class Fx {
       const mesh = new THREE.Mesh(GEO.particle, MAT.arrow);
       mesh.visible = false;
       scene.add(mesh);
-      this.particles.push({ mesh, vel: new THREE.Vector3(), life: 0, maxLife: 1, size: 1, active: false });
+      this.particles.push({ mesh, vel: new THREE.Vector3(), life: 0, maxLife: 1, size: 1, gravity: 14, grow: 0, active: false });
     }
     for (let i = 0; i < 140; i++) {
       const mesh = new THREE.Mesh(GEO.coin, MAT.coin);
@@ -95,7 +97,25 @@ export class Fx {
       const s = speed * (0.4 + Math.random() * 0.8);
       p.vel.set(Math.cos(a) * s, 2 + Math.random() * speed, Math.sin(a) * s);
       p.maxLife = p.life = 0.45 + Math.random() * 0.4;
+      p.gravity = 14;
+      p.grow = 0;
     }
+  }
+
+  /** A soft puff that drifts upward and swells (chimney smoke, dust). */
+  smoke(pos: THREE.Vector3, color = 0x9a8f86) {
+    const p = this.particles.find((q) => !q.active);
+    if (!p) return;
+    p.active = true;
+    p.mesh.visible = true;
+    p.mesh.material = this.mat(color);
+    p.mesh.position.copy(pos);
+    p.size = 2.2;
+    p.mesh.scale.setScalar(p.size);
+    p.vel.set((Math.random() - 0.5) * 0.4, 1.4, (Math.random() - 0.5) * 0.4);
+    p.maxLife = p.life = 1.8;
+    p.gravity = 0;
+    p.grow = 1;
   }
 
   /** Returns false when the pool is exhausted (caller should apply the effect instantly). */
@@ -138,9 +158,9 @@ export class Fx {
         p.mesh.visible = false;
         continue;
       }
-      p.vel.y -= 14 * dt;
+      p.vel.y -= p.gravity * dt;
       p.mesh.position.addScaledVector(p.vel, dt);
-      if (p.mesh.position.y < 0.08) {
+      if (p.gravity && p.mesh.position.y < 0.08) {
         p.mesh.position.y = 0.08;
         p.vel.y *= -0.3;
         p.vel.x *= 0.6;
@@ -148,7 +168,8 @@ export class Fx {
       }
       p.mesh.rotation.x += dt * 8;
       p.mesh.rotation.y += dt * 6;
-      p.mesh.scale.setScalar(Math.max(0.05, p.life / p.maxLife) * p.size);
+      const k = p.life / p.maxLife;
+      p.mesh.scale.setScalar(p.grow ? p.size * (1 + (1 - k) * 1.5) * Math.min(1, k * 3) : Math.max(0.05, k) * p.size);
     }
 
     for (const f of this.flyers) {

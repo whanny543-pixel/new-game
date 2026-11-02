@@ -471,3 +471,45 @@ h2 {
     max-width: 260px;
   }
 }
+
+/* Defender count above towers and guard posts. */
+.wlabel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 64px;
+  margin: -14px 0 0 -32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 0;
+  border-radius: 999px;
+  background: rgba(43, 29, 18, 0.78);
+  border: 2px solid rgba(255, 244, 214, 0.35);
+  font-size: 15px;
+  color: #fff;
+  will-change: transform;
+}
+.wlabel b {
+  width: 16px;
+  height: 16px;
+  background-size: contain;
+  background-repeat: no-repeat;
+}
+.wlabel.archer b {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 2c10 4 10 16 0 20' fill='none' stroke='%23ffc928' stroke-width='3'/%3E%3Cpath d='M6 2v20M2 12h20' stroke='%23fff4d6' stroke-width='2'/%3E%3C/svg%3E");
+}
+.wlabel.knight b {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 1l3 4v11h-6V5z' fill='%23fff4d6'/%3E%3Cpath d='M6 16h12v2H6zM11 18h2v5h-2z' fill='%23ffc928'/%3E%3C/svg%3E");
+}
+.wlabel.warn {
+  background: rgba(170, 40, 30, 0.85);
+  border-color: #ffb3a6;
+  animation: nudge 1s ease-in-out infinite;
+}
+@keyframes nudge {
+  50% {
+    border-color: #fff;
+  }
+}

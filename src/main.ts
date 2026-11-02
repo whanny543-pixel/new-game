@@ -6,7 +6,6 @@ import { Hud } from './hud';
 import { Input } from './input';
 import { Run } from './run';
 import { World } from './world';
-import { ZONE_RADII } from './config';
 import './style.css';
 
 type State = 'menu' | 'playing' | 'paused' | 'over';
@@ -33,7 +32,7 @@ class Game {
   private canvas = document.getElementById('c') as HTMLCanvasElement;
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(42, 1, 0.5, 140);
+  private camera = new THREE.PerspectiveCamera(40, 1, 0.5, 160);
   private camFocus = new THREE.Vector3(0, 0, 2);
   private camZoom = 1;
   private world: World;
@@ -56,6 +55,8 @@ class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.95;
 
     this.world = new World(this.scene, mobile ? 1024 : 2048);
     this.fx = new Fx(this.scene, document.getElementById('world-ui')!);
@@ -70,6 +71,7 @@ class Game {
 
     // A demo run plays behind the title screen so the world is alive from the first frame.
     this.newRun();
+    this.world.decorate(this.scene, this.run!.reservedSpots());
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && this.state === 'playing') this.pause();
@@ -199,22 +201,21 @@ class Game {
     }
 
     // Camera: fixed three-quarter view following the hero; zooms out as the land grows.
-    const zoneZoom = 1 + (ZONE_RADII[run.zone] - ZONE_RADII[0]) * 0.012;
     // Narrower screens need a slightly higher camera to show the same width of the world.
     const aspectZoom = Math.min(1.35, Math.max(1, 0.5 / (this.w / this.h)) * 1.1);
-    const targetZoom = aspectZoom * zoneZoom * (this.state === 'menu' ? 1.15 : 1);
+    const targetZoom = aspectZoom * (this.state === 'menu' ? 1.15 : 1);
     this.camZoom += (targetZoom - this.camZoom) * Math.min(1, dt * 2);
     const follow = this.state === 'menu' ? new THREE.Vector3(Math.sin(this.menuT * 0.2) * 3, 0, 0) : run.heroPos;
     this.camFocus.lerp(follow, Math.min(1, dt * 5));
     const shake = this.fx.shake;
     this.camera.position.set(
       this.camFocus.x + (Math.random() - 0.5) * shake * 0.5,
-      15.5 * this.camZoom,
-      this.camFocus.z + 11 * this.camZoom + (Math.random() - 0.5) * shake * 0.5,
+      30 * this.camZoom,
+      this.camFocus.z + 13.5 * this.camZoom + (Math.random() - 0.5) * shake * 0.5,
     );
-    this.camera.lookAt(this.camFocus.x, 0, this.camFocus.z - 0.8);
+    this.camera.lookAt(this.camFocus.x, 0, this.camFocus.z - 1.5);
 
-    this.world.update(dt, this.camFocus);
+    this.world.update(this.camFocus);
     if (this.state !== 'paused') this.fx.update(dt, this.camera, this.w, this.h);
     this.hud.render(dt, this.camera, this.w, this.h);
     this.renderer.render(this.scene, this.camera);

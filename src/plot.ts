@@ -1,19 +1,25 @@
 import * as THREE from 'three';
-import type { PadDef, PadKind } from './config';
+import type { PlotDef, PlotKind } from './config';
 
 // A build plot: a flat marker on the ground showing what it builds and how much gold is left.
 
 const SIZE = 2.3;
 const PX = 256;
 
-const LABEL: Record<PadKind, string> = {
-  tower: 'Tower',
-  wall: 'Palisade',
-  squire: 'Squire',
+const LABEL: Record<PlotKind, string> = {
+  tower: 'Watchtower',
+  post: 'Guard Post',
+  barricade: 'Barricade',
+  range: 'Archery Range',
+  barracks: 'Barracks',
   forge: 'Forge',
-  expand: 'Claim Land',
-  mine: 'Gold Mine',
+  bowyer: 'Bowyer',
+  recruitArcher: 'Recruit Archer',
+  recruitKnight: 'Recruit Knight',
 };
+
+/** Repeating plots (recruiting) don't show a level number. */
+const REPEATING = new Set<PlotKind>(['recruitArcher', 'recruitKnight', 'barricade']);
 
 export class Plot {
   readonly group = new THREE.Group();
@@ -31,7 +37,7 @@ export class Plot {
   private drawnKey = '';
   private pulse = 0;
 
-  constructor(readonly def: PadDef) {
+  constructor(readonly def: PlotDef) {
     this.canvas.width = this.canvas.height = PX;
     this.tex = new THREE.CanvasTexture(this.canvas);
     this.tex.colorSpace = THREE.SRGBColorSpace;
@@ -45,7 +51,7 @@ export class Plot {
     this.plane.renderOrder = 2;
     this.group.add(this.plane);
     this.group.visible = false;
-    this.setPos(def.x, def.z);
+    this.setPos(0, 0);
   }
 
   setPos(x: number, z: number) {
@@ -127,12 +133,13 @@ export class Plot {
     g.restore();
 
     // Label
-    g.font = 'bold 26px "Lilita One", "Trebuchet MS", sans-serif';
+    const lvl = !REPEATING.has(this.def.kind) && this.level > 0 ? ` ${roman(this.level + 1)}` : '';
+    const label = LABEL[this.def.kind] + lvl;
+    g.font = `bold ${label.length > 13 ? 22 : 26}px "Lilita One", "Trebuchet MS", sans-serif`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillStyle = '#fff4d6';
-    const lvl = this.def.costs.length > 1 && this.level > 0 ? ` ${roman(this.level + 1)}` : '';
-    g.fillText(LABEL[this.def.kind] + lvl, W / 2, 158);
+    g.fillText(label, W / 2, 158);
 
     // Cost: coin + number
     const txt = String(this.remaining);
@@ -163,6 +170,12 @@ export class Plot {
   }
 }
 
+function plus(g: CanvasRenderingContext2D) {
+  g.moveTo(30, -44);
+  g.rect(30, -44, 10, 30);
+  g.rect(20, -34, 30, 10);
+}
+
 function roman(n: number) {
   return ['I', 'II', 'III', 'IV', 'V', 'VI'][n - 1] ?? String(n);
 }
@@ -178,7 +191,7 @@ function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number,
 }
 
 /** Simple bold silhouettes, drawn around (0,0), roughly 80px tall. */
-function drawIcon(g: CanvasRenderingContext2D, kind: PadKind) {
+function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
   g.fillStyle = '#fff4d6';
   g.strokeStyle = '#3a2410';
   g.lineWidth = 6;
@@ -186,77 +199,92 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PadKind) {
   g.beginPath();
   switch (kind) {
     case 'tower':
-      g.moveTo(-24, 40);
-      g.lineTo(-24, -14);
-      g.lineTo(-32, -14);
-      g.lineTo(-32, -40);
-      for (let i = 0; i < 4; i++) {
-        const x = -32 + i * 16;
-        g.lineTo(x + 8, -40);
-        g.lineTo(x + 8, -30);
-        g.lineTo(x + 16, -30);
-        g.lineTo(x + 16, -40);
-      }
-      g.lineTo(32, -14);
-      g.lineTo(24, -14);
-      g.lineTo(24, 40);
+      // Stilt tower
+      g.rect(-30, -40, 60, 16);
+      g.moveTo(-24, -24);
+      g.lineTo(-30, 42);
+      g.lineTo(-20, 42);
+      g.lineTo(-14, -24);
+      g.closePath();
+      g.moveTo(24, -24);
+      g.lineTo(30, 42);
+      g.lineTo(20, 42);
+      g.lineTo(14, -24);
+      g.closePath();
+      g.rect(-22, 4, 44, 8);
+      break;
+    case 'post':
+      // Banner on a pole
+      g.rect(-24, -42, 8, 84);
+      g.moveTo(-16, -40);
+      g.lineTo(30, -40);
+      g.lineTo(30, 0);
+      g.lineTo(7, -10);
+      g.lineTo(-16, 0);
       g.closePath();
       break;
-    case 'wall':
-      for (let i = 0; i < 5; i++) {
-        const x = -40 + i * 17;
-        g.moveTo(x, 36);
-        g.lineTo(x, -16);
-        g.lineTo(x + 7, -34);
-        g.lineTo(x + 14, -16);
-        g.lineTo(x + 14, 36);
+    case 'barricade':
+      for (let i = 0; i < 4; i++) {
+        const x = -36 + i * 22;
+        g.moveTo(x, 38);
+        g.lineTo(x + 18, -30);
+        g.lineTo(x + 26, -26);
+        g.lineTo(x + 10, 40);
         g.closePath();
       }
       break;
-    case 'squire':
-      g.arc(0, -22, 16, 0, Math.PI * 2);
-      g.moveTo(-26, 40);
-      g.quadraticCurveTo(-26, -2, 0, -2);
-      g.quadraticCurveTo(26, -2, 26, 40);
+    case 'range':
+      g.arc(0, 0, 38, 0, Math.PI * 2);
+      g.moveTo(22, 0);
+      g.arc(0, 0, 22, 0, Math.PI * 2);
+      g.moveTo(8, 0);
+      g.arc(0, 0, 8, 0, Math.PI * 2);
+      break;
+    case 'barracks':
+    case 'recruitKnight':
+      // Helmet
+      g.moveTo(-30, 30);
+      g.lineTo(-30, -6);
+      g.quadraticCurveTo(-30, -40, 0, -40);
+      g.quadraticCurveTo(30, -40, 30, -6);
+      g.lineTo(30, 30);
+      g.lineTo(6, 30);
+      g.lineTo(6, 0);
+      g.lineTo(-6, 0);
+      g.lineTo(-6, 30);
       g.closePath();
+      if (kind === 'recruitKnight') plus(g);
+      break;
+    case 'recruitArcher':
+      // Bow with arrow
+      g.moveTo(-8, -40);
+      g.quadraticCurveTo(44, 0, -8, 40);
+      g.lineTo(-8, 30);
+      g.quadraticCurveTo(28, 0, -8, -30);
+      g.closePath();
+      g.rect(-34, -3, 56, 6);
+      plus(g);
       break;
     case 'forge':
-      // Sword
-      g.moveTo(0, -42);
-      g.lineTo(9, -30);
-      g.lineTo(9, 14);
-      g.lineTo(26, 14);
-      g.lineTo(26, 22);
-      g.lineTo(6, 22);
-      g.lineTo(6, 40);
-      g.lineTo(-6, 40);
-      g.lineTo(-6, 22);
-      g.lineTo(-26, 22);
-      g.lineTo(-26, 14);
-      g.lineTo(-9, 14);
-      g.lineTo(-9, -30);
+      // Anvil
+      g.moveTo(-40, -22);
+      g.lineTo(34, -22);
+      g.quadraticCurveTo(34, -6, 14, -4);
+      g.lineTo(10, 14);
+      g.lineTo(26, 30);
+      g.lineTo(-26, 30);
+      g.lineTo(-10, 14);
+      g.lineTo(-14, -4);
+      g.quadraticCurveTo(-30, -6, -40, -22);
       g.closePath();
       break;
-    case 'expand':
-      // Flag on a pole
-      g.moveTo(-22, 42);
-      g.lineTo(-22, -40);
-      g.lineTo(30, -26);
-      g.lineTo(-12, -10);
-      g.lineTo(-12, 42);
+    case 'bowyer':
+      g.moveTo(-14, -40);
+      g.quadraticCurveTo(46, 0, -14, 40);
+      g.lineTo(-14, 30);
+      g.quadraticCurveTo(30, 0, -14, -30);
       g.closePath();
-      break;
-    case 'mine':
-      // Pickaxe
-      g.moveTo(-38, -16);
-      g.quadraticCurveTo(0, -46, 38, -16);
-      g.quadraticCurveTo(0, -32, -38, -16);
-      g.closePath();
-      g.moveTo(-5, -30);
-      g.lineTo(5, -30);
-      g.lineTo(5, 42);
-      g.lineTo(-5, 42);
-      g.closePath();
+      g.rect(-18, -40, 4, 80);
       break;
   }
   g.stroke();

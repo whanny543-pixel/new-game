@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { COLORS, WORLD_RADIUS, ZONE_RADII } from './config';
-import { makeCliff, makeDeadTree, makePine, makeRock } from './models';
+import { COLORS, ROAD_HALF_WIDTH, ROADS } from './config';
+import { Road } from './road';
+import { makeBush, makeCactus, makeDeadTree, makeLantern, makeMesa, makeProps, makeRock } from './models';
 
 /** Small deterministic RNG so the map looks the same every run. */
 export function mulberry32(seed: number) {
@@ -13,23 +14,40 @@ export function mulberry32(seed: number) {
   };
 }
 
-function speckleTexture(base: number, dots: number[], count: number, size = 256) {
+const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+
+function sandTexture(size = 512) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const g = c.getContext('2d')!;
-  g.fillStyle = `#${base.toString(16).padStart(6, '0')}`;
+  g.fillStyle = hex(COLORS.sand);
   g.fillRect(0, 0, size, size);
-  const rng = mulberry32(base);
-  for (let i = 0; i < count; i++) {
-    g.fillStyle = `#${dots[i % dots.length].toString(16).padStart(6, '0')}`;
-    g.globalAlpha = 0.25 + rng() * 0.35;
+  const rng = mulberry32(7);
+  // Soft dunes of light and shade.
+  for (let i = 0; i < 40; i++) {
     const x = rng() * size;
     const y = rng() * size;
-    const r = 1 + rng() * 3;
-    g.beginPath();
-    g.ellipse(x, y, r * 1.6, r, 0, 0, Math.PI * 2);
-    g.fill();
+    const r = 30 + rng() * 90;
+    const grad = g.createRadialGradient(x, y, 0, x, y, r);
+    const col = rng() > 0.5 ? COLORS.sandLight : COLORS.sandDark;
+    grad.addColorStop(0, hex(col) + '55');
+    grad.addColorStop(1, hex(col) + '00');
+    g.fillStyle = grad;
+    for (const ox of [-size, 0, size])
+      for (const oy of [-size, 0, size]) {
+        g.save();
+        g.translate(ox, oy);
+        g.fillRect(x - r, y - r, r * 2, r * 2);
+        g.restore();
+      }
   }
+  // Grit.
+  for (let i = 0; i < 2600; i++) {
+    g.fillStyle = hex(rng() > 0.5 ? COLORS.sandDark : COLORS.sandLight);
+    g.globalAlpha = 0.25 + rng() * 0.3;
+    g.fillRect(rng() * size, rng() * size, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  g.globalAlpha = 1;
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
@@ -39,139 +57,95 @@ function speckleTexture(base: number, dots: number[], count: number, size = 256)
 
 export class World {
   readonly sun: THREE.DirectionalLight;
-  private territory: THREE.Mesh;
-  private territoryTex: THREE.Texture;
-  private edge: THREE.Mesh;
-  private radius = ZONE_RADII[0];
-  private targetRadius = ZONE_RADII[0];
+  readonly roads: Road[];
+  private roadMeshes: THREE.Mesh[] = [];
 
   constructor(scene: THREE.Scene, shadowSize: number) {
     scene.background = new THREE.Color(COLORS.sky);
-    scene.fog = new THREE.Fog(COLORS.fog, 38, 70);
+    scene.fog = new THREE.Fog(COLORS.fog, 55, 105);
 
-    scene.add(new THREE.HemisphereLight(0xfff4e0, 0x6a5040, 1.5));
-    const sun = new THREE.DirectionalLight(0xfff1d6, 2.1);
+    scene.add(new THREE.HemisphereLight(0xfff0dc, 0xb87a48, 1.1));
+    const sun = new THREE.DirectionalLight(0xffdcae, 2.6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(shadowSize, shadowSize);
     const s = sun.shadow.camera;
-    s.left = s.bottom = -20;
-    s.right = s.top = 20;
+    s.left = s.bottom = -30;
+    s.right = s.top = 30;
     s.near = 1;
-    s.far = 60;
-    sun.shadow.bias = -0.0015;
-    sun.shadow.normalBias = 0.03;
+    s.far = 80;
+    sun.shadow.bias = -0.0012;
+    sun.shadow.normalBias = 0.04;
     scene.add(sun, sun.target);
     this.sun = sun;
 
-    // Dirt ground.
-    const dirt = speckleTexture(COLORS.ground, [COLORS.groundDark, 0xe0c08a, 0x8f6c3e], 900);
-    dirt.repeat.set(30, 30);
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(WORLD_RADIUS + 30, 64),
-      new THREE.MeshLambertMaterial({ map: dirt }),
-    );
+    const tex = sandTexture();
+    tex.repeat.set(14, 14);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshLambertMaterial({ map: tex }));
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    // Worn dirt roads leading in from the wilds.
-    const roadMat = new THREE.MeshLambertMaterial({ color: 0xdcbb84 });
-    for (const deg of [0, 120, 240]) {
-      const road = new THREE.Mesh(new THREE.PlaneGeometry(2.6, WORLD_RADIUS), roadMat);
-      road.rotation.x = -Math.PI / 2;
-      road.rotation.z = (-deg * Math.PI) / 180;
-      const a = (deg * Math.PI) / 180;
-      road.position.set(Math.sin(a) * WORLD_RADIUS * 0.5, 0.005, -Math.cos(a) * WORLD_RADIUS * 0.5);
-      road.receiveShadow = true;
-      scene.add(road);
+    this.roads = ROADS.map((pts) => new Road(pts));
+    for (const r of this.roads) {
+      const m = r.makeMesh();
+      scene.add(m);
+      this.roadMeshes.push(m);
     }
-
-    // Grass territory that grows as the player expands.
-    this.territoryTex = speckleTexture(COLORS.colony, [COLORS.colonyLine, 0x4f9e36, 0x9be36f], 700);
-    this.territory = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 72),
-      new THREE.MeshLambertMaterial({ map: this.territoryTex }),
-    );
-    this.territory.rotation.x = -Math.PI / 2;
-    this.territory.position.y = 0.012;
-    this.territory.receiveShadow = true;
-    scene.add(this.territory);
-
-    this.edge = new THREE.Mesh(
-      new THREE.RingGeometry(0.97, 1.0, 72),
-      new THREE.MeshBasicMaterial({ color: COLORS.colonyEdge, transparent: true, opacity: 0.7 }),
-    );
-    this.edge.rotation.x = -Math.PI / 2;
-    this.edge.position.y = 0.02;
-    scene.add(this.edge);
-    this.applyRadius();
-
-    this.decorate(scene);
+    // The east road is hidden until it opens.
+    this.roadMeshes[1].visible = false;
   }
 
-  private decorate(scene: THREE.Scene) {
-    const rng = mulberry32(1337);
-    const finalR = ZONE_RADII[ZONE_RADII.length - 1] + 2.5;
-    const onRoad = (x: number, z: number) => {
-      for (const deg of [0, 120, 240]) {
-        const a = (deg * Math.PI) / 180;
-        const dx = Math.sin(a);
-        const dz = -Math.cos(a);
-        const along = x * dx + z * dz;
-        const across = Math.abs(x * dz - z * dx);
-        if (along > 0 && across < 2.8) return true;
-      }
-      return false;
+  openRoad(i: number, on: boolean) {
+    this.roadMeshes[i].visible = on;
+  }
+
+  /** Scatter scenery, keeping clear of roads and of the given reserved spots. */
+  decorate(scene: THREE.Scene, reserved: { x: number; z: number; r: number }[]) {
+    const rng = mulberry32(2024);
+    const clear = (x: number, z: number, pad: number) => {
+      if (Math.hypot(x, z) < 9 + pad) return false;
+      for (const r of this.roads) if (r.distanceTo(x, z) < ROAD_HALF_WIDTH + 1.6 + pad) return false;
+      for (const q of reserved) if (Math.hypot(x - q.x, z - q.z) < q.r + pad) return false;
+      return true;
     };
-    const place = (obj: THREE.Object3D, rMin: number, rMax: number, avoidRoads = true) => {
-      for (let tries = 0; tries < 20; tries++) {
-        const a = rng() * Math.PI * 2;
-        const r = rMin + rng() * (rMax - rMin);
-        const x = Math.cos(a) * r;
-        const z = Math.sin(a) * r;
-        if (avoidRoads && onRoad(x, z)) continue;
-        obj.position.x = x;
-        obj.position.z = z;
-        scene.add(obj);
-        return;
+    const place = (make: () => THREE.Object3D, n: number, rMin: number, rMax: number, pad: number) => {
+      for (let i = 0; i < n; i++) {
+        for (let tries = 0; tries < 25; tries++) {
+          const a = rng() * Math.PI * 2;
+          const r = rMin + rng() * (rMax - rMin);
+          const x = Math.cos(a) * r;
+          const z = Math.sin(a) * r - 10;
+          if (!clear(x, z, pad)) continue;
+          const o = make();
+          o.position.set(x, 0, z);
+          o.rotation.y = rng() * Math.PI * 2;
+          scene.add(o);
+          break;
+        }
       }
     };
-    for (let i = 0; i < 70; i++) place(makePine(rng), finalR + 1, WORLD_RADIUS + 8);
-    for (let i = 0; i < 26; i++) place(makeDeadTree(rng), finalR, WORLD_RADIUS);
-    for (let i = 0; i < 40; i++) {
-      const r = makeRock(rng);
-      place(r, finalR, WORLD_RADIUS + 6);
-      r.position.y = 0.1;
+    place(() => makeMesa(rng), 34, 30, 70, 4);
+    place(() => makeMesa(rng), 8, 16, 30, 4.5);
+    place(() => makeCactus(rng), 60, 8, 60, 0.8);
+    place(() => makeBush(rng), 70, 6, 60, 0.6);
+    place(() => makeRock(rng), 60, 6, 60, 0.8);
+    place(() => makeDeadTree(rng), 18, 10, 55, 1);
+    place(() => makeProps(rng), 10, 9, 22, 1.2);
+
+    // Lanterns along the last stretch of each road.
+    for (const road of this.roads) {
+      for (const t of [0.93, 0.83]) {
+        const v = road.point(road.length * t, ROAD_HALF_WIDTH + 0.7, new THREE.Vector3());
+        const l = makeLantern();
+        l.position.copy(v);
+        scene.add(l);
+      }
     }
-    for (let i = 0; i < 26; i++) place(makeCliff(rng), WORLD_RADIUS + 4, WORLD_RADIUS + 16, false);
   }
 
-  setLevel(level: number, instant = false) {
-    this.targetRadius = ZONE_RADII[Math.min(level, ZONE_RADII.length - 1)];
-    if (instant) {
-      this.radius = this.targetRadius;
-      this.applyRadius();
-    }
-  }
-
-  get currentRadius() {
-    return this.radius;
-  }
-
-  private applyRadius() {
-    this.territory.scale.setScalar(this.radius);
-    this.edge.scale.setScalar(this.radius);
-    // Keep texel density constant as the disc grows.
-    this.territoryTex.repeat.set(this.radius / 2.5, this.radius / 2.5);
-  }
-
-  update(dt: number, focus: THREE.Vector3) {
-    if (Math.abs(this.radius - this.targetRadius) > 0.01) {
-      this.radius += (this.targetRadius - this.radius) * Math.min(1, dt * 3);
-      this.applyRadius();
-    }
+  update(focus: THREE.Vector3) {
     // Shadow frustum follows the camera focus so shadows stay crisp.
-    this.sun.position.set(focus.x + 9, 20, focus.z + 7);
+    this.sun.position.set(focus.x + 12, 26, focus.z + 6);
     this.sun.target.position.copy(focus);
   }
 }

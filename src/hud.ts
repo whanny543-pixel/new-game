@@ -93,6 +93,28 @@ export class Hud {
     b.fill.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
   }
 
+  /** A small pill showing how many defenders a tower or post holds. */
+  worldLabel(kind: 'archer' | 'knight') {
+    const el = document.createElement('div');
+    el.className = `wlabel ${kind}`;
+    const icon = document.createElement('b');
+    const text = document.createElement('span');
+    el.append(icon, text);
+    el.style.display = 'none';
+    this.layer.appendChild(el);
+    this.bars.set(el, { el, fill: text, pos: new THREE.Vector3(), visible: false });
+    return el;
+  }
+
+  placeLabel(el: HTMLElement, pos: THREE.Vector3, text: string, warn: boolean) {
+    const b = this.bars.get(el);
+    if (!b) return;
+    b.visible = true;
+    b.pos.copy(pos);
+    if (b.fill.textContent !== text) b.fill.textContent = text;
+    el.classList.toggle('warn', warn);
+  }
+
   removeBar(el: HTMLElement) {
     el.remove();
     this.bars.delete(el);

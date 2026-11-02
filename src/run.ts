@@ -1,21 +1,26 @@
 import * as THREE from 'three';
 import {
-  ENEMIES,
-  FORGE_LEVELS,
-  KEEP,
-  MINE,
-  PADS,
-  PLAYER,
-  SPAWN_RADIUS,
-  SQUIRE,
-  TOWER_LEVELS,
-  WALL_HP,
-  WAVES,
-  ZONE_RADII,
+  ARCHER,
+  BALLISTA,
+  BARRICADE_HP,
+  BOW_TIERS,
   COLORS,
+  ENEMIES,
+  HALL,
+  KNIGHT,
+  PLAYER,
+  PLOTS,
+  POST_LEVELS,
+  ROADSIDE_PAD,
+  ROAD_HALF_WIDTH,
+  SWORD_TIERS,
+  TOWER_LEVELS,
+  WAVES,
+  WORKSHOP,
   type EnemyKind,
   type EnemyType,
-  type WallSpec,
+  type Place,
+  type PlotDef,
 } from './config';
 import * as M from './models';
 import { Plot } from './plot';
@@ -23,18 +28,32 @@ import type { Fx } from './fx';
 import type { Sfx } from './audio';
 import type { Hud } from './hud';
 import type { World } from './world';
+import type { Road } from './road';
 
 // One play-through. Everything created here lives under `root` and is thrown away on restart.
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+const v3 = new THREE.Vector3();
+const mtx = new THREE.Matrix4();
+const quat = new THREE.Quaternion();
+const scl = new THREE.Vector3();
+const col = new THREE.Color();
+const eul = new THREE.Euler();
+
+type UnitType = 'archer' | 'knight';
+type WeaponKind = 'sword' | 'bow';
 
 interface Enemy {
   kind: EnemyKind;
   type: EnemyType;
-  rig: M.EnemyRig;
-  pos: THREE.Vector3;
+  road: number;
+  s: number;
+  off: number;
+  x: number;
+  z: number;
+  facing: number;
   hp: number;
   maxHp: number;
   alive: boolean;
@@ -42,7 +61,76 @@ interface Enemy {
   lunge: number;
   flash: number;
   phase: number;
+  moving: boolean;
   bar: HTMLElement | null;
+}
+
+interface Unit {
+  type: UnitType;
+  rig: M.UnitRig;
+  pos: THREE.Vector3;
+  tier: number;
+  state: 'follow' | 'walk' | 'station';
+  home: Tower | Post | null;
+  slot: number;
+  cd: number;
+  hp: number;
+  lastHit: number;
+  facing: number;
+  swing: number;
+  /** Knights on a post: their spot on the road. */
+  roadS: number;
+  roadOff: number;
+}
+
+interface Tower {
+  plot: Plot;
+  pos: THREE.Vector3;
+  rig: M.TowerRig;
+  level: number;
+  units: (Unit | null)[];
+  ballistaCd: number;
+  grow: number;
+  label: HTMLElement;
+}
+
+interface Post {
+  plot: Plot;
+  road: number;
+  s: number;
+  level: number;
+  units: (Unit | null)[];
+  flag: THREE.Mesh;
+  pos: THREE.Vector3;
+  label: HTMLElement;
+}
+
+interface Barricade {
+  plot: Plot;
+  road: number;
+  s: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  mesh: THREE.Mesh;
+  pos: THREE.Vector3;
+  lastHit: number;
+  shake: number;
+  rise: number;
+}
+
+interface Workshop {
+  plot: Plot;
+  kind: 'range' | 'barracks' | 'forge' | 'bowyer';
+  rig: M.WorkshopRig;
+  pos: THREE.Vector3;
+  level: number;
+  timer: number;
+  rack: number[];
+  rackMesh: THREE.InstancedMesh | null;
+  rackWorld: THREE.Vector3;
+  pickT: number;
+  smokeT: number;
 }
 
 interface Arrow {
@@ -54,6 +142,15 @@ interface Arrow {
   active: boolean;
 }
 
+interface Bolt {
+  mesh: THREE.Mesh;
+  pos: THREE.Vector3;
+  dir: THREE.Vector3;
+  left: number;
+  hits: Set<Enemy>;
+  active: boolean;
+}
+
 interface GroundCoin {
   mesh: THREE.Mesh;
   vel: THREE.Vector3;
@@ -61,43 +158,10 @@ interface GroundCoin {
   age: number;
 }
 
-interface Tower {
-  rig: M.TowerRig;
-  pos: THREE.Vector3;
-  level: number;
-  cd: number;
-  grow: number;
-}
-
-interface Wall {
-  spec: WallSpec;
-  rig: ReturnType<typeof M.makeWall>;
-  hp: number;
-  maxHp: number;
-  alive: boolean;
-  lastHit: number;
-  tx: number;
-  tz: number;
-  plot: Plot;
-  shake: number;
-}
-
-interface Mine {
-  rig: ReturnType<typeof M.makeMine>;
-  pos: THREE.Vector3;
-  level: number;
-  timer: number;
-  pile: number;
-  pileMesh: THREE.InstancedMesh;
-  pilePos: THREE.Vector3;
-  collectT: number;
-}
-
-interface Squire {
-  rig: ReturnType<typeof M.makeSquire>;
-  pos: THREE.Vector3;
-  cd: number;
-  facing: number;
+interface SpawnItem {
+  at: number;
+  kind: EnemyKind;
+  road: number;
 }
 
 export interface RunEvents {
@@ -105,63 +169,74 @@ export interface RunEvents {
   haptic(strong: boolean): void;
 }
 
+const MAX_ENEMIES: Record<EnemyKind, number> = { goblin: 420, runner: 220, troll: 24 };
+
 export class Run {
   readonly root = new THREE.Group();
   time = 0;
   wave = 0;
-  zone = 0;
   over = false;
 
   // Hero
   hero = M.makeHero();
-  heroPos = new THREE.Vector3(0, 0, 3.2);
+  heroPos = new THREE.Vector3(0, 0, 5.5);
   heroVel = new THREE.Vector3();
   heroFacing = Math.PI;
+  private moveDir = new THREE.Vector3(0, 0, -1);
   heroHp = PLAYER.maxHp;
   heroAlive = true;
-  respawnT = 0;
-  heroCd = 0;
-  heroHurt = 0;
-  walkT = 0;
-  forge = 0;
+  private respawnT = 0;
+  private heroCd = 0;
+  private heroHurt = 0;
+  private heroLastHit = -99;
+  private walkT = 0;
   carry = 0;
+  weapons: { kind: WeaponKind; tier: number }[] = [];
   private stack: THREE.InstancedMesh;
+  private swordStack: THREE.InstancedMesh;
+  private bowStack: THREE.InstancedMesh;
   private stackLean = new THREE.Vector2();
   private pickupCombo = 0;
   private pickupComboT = 0;
   private heroBar: HTMLElement;
+  private giveT = 0;
 
-  // Keep
-  keep = M.makeKeep();
-  keepHp = KEEP.maxHp;
-  private keepLastHit = -99;
+  // Hall
+  hall = M.makeHall();
+  hallHp = HALL.maxHp;
+  private hallLastHit = -99;
 
-  // Collections
+  // Enemies
   enemies: Enemy[] = [];
-  private enemyPool: Record<EnemyKind, M.EnemyRig[]> = { goblin: [], runner: [], troll: [] };
-  private arrows: Arrow[] = [];
-  private coins: GroundCoin[] = [];
+  private crowd: Record<EnemyKind, THREE.InstancedMesh>;
+  private grid = new Map<number, Enemy[]>();
+
+  // Defence
   plots: Plot[] = [];
   private towers = new Map<string, Tower>();
-  private walls: Wall[] = [];
-  private mines = new Map<string, Mine>();
-  private squires: Squire[] = [];
+  private posts = new Map<string, Post>();
+  private barricades = new Map<string, Barricade>();
+  private shops = new Map<string, Workshop>();
+  units: Unit[] = [];
+
+  // Projectiles & pickups
+  private arrows: Arrow[] = [];
+  private bolts: Bolt[] = [];
+  private coins: GroundCoin[] = [];
   private guide: THREE.Mesh[] = [];
 
   // Paying
   private payT = 0;
   private payStreak = 0;
   private activePlot: Plot | null = null;
-  private tutorialDone = false;
 
   // Waves
-  private spawnQueue: EnemyKind[] = [];
-  private spawnT = 0;
-  private spawnInterval = 1;
-  private waveBreak: number = WAVES.firstDelay;
-  private waveSpawned = 0;
+  private queue: SpawnItem[] = [];
+  private waveStart = 0;
+  private nextWaveAt: number = WAVES.firstDelay;
   private waveTotal = 1;
-  private lastSpawn = 0;
+  private waveSpawned = 0;
+  private roadBOpen = false;
 
   constructor(
     private scene: THREE.Scene,
@@ -172,10 +247,9 @@ export class Run {
     private events: RunEvents,
   ) {
     scene.add(this.root);
-    world.setLevel(0, true);
+    world.openRoad(1, false);
 
-    this.keep.root.scale.setScalar(0.8);
-    this.root.add(this.keep.root);
+    this.root.add(this.hall.root);
     this.root.add(this.hero.root);
     this.hero.root.position.copy(this.heroPos);
 
@@ -183,54 +257,125 @@ export class Run {
     this.stack.count = 0;
     this.stack.castShadow = true;
     this.stack.frustumCulled = false;
-    this.hero.stackAnchor.add(this.stack);
+    this.hero.backAnchor.add(this.stack);
+    this.swordStack = this.makeItemStack(M.GEO.sword);
+    this.bowStack = this.makeItemStack(M.GEO.bow);
     this.heroBar = hud.worldBar('hero');
 
-    for (let i = 0; i < 160; i++) {
+    const mk = (kind: EnemyKind) => {
+      const im = new THREE.InstancedMesh(M.enemyGeometry(kind), M.MAT.vc, MAX_ENEMIES[kind]);
+      im.count = 0;
+      im.castShadow = true;
+      im.frustumCulled = false;
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.setColorAt(0, col.setRGB(1, 1, 1));
+      this.root.add(im);
+      return im;
+    };
+    this.crowd = { goblin: mk('goblin'), runner: mk('runner'), troll: mk('troll') };
+
+    for (let i = 0; i < 220; i++) {
       const mesh = new THREE.Mesh(M.GEO.arrow, M.MAT.arrow);
       mesh.visible = false;
       this.root.add(mesh);
       this.arrows.push({ mesh, pos: new THREE.Vector3(), target: null, aim: new THREE.Vector3(), damage: 0, active: false });
     }
-    for (let i = 0; i < 220; i++) {
+    for (let i = 0; i < 16; i++) {
+      const mesh = new THREE.Mesh(M.GEO.bolt, M.MAT.bolt);
+      mesh.visible = false;
+      this.root.add(mesh);
+      this.bolts.push({ mesh, pos: new THREE.Vector3(), dir: new THREE.Vector3(), left: 0, hits: new Set(), active: false });
+    }
+    for (let i = 0; i < 320; i++) {
       const mesh = new THREE.Mesh(M.GEO.coin, M.MAT.coin);
       mesh.castShadow = true;
       mesh.visible = false;
       this.root.add(mesh);
       this.coins.push({ mesh, vel: new THREE.Vector3(), active: false, age: 0 });
     }
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false });
-    for (let i = 0; i < 16; i++) {
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
+    for (let i = 0; i < 18; i++) {
       const d = new THREE.Mesh(M.GEO.dot, dotMat);
       d.rotation.x = -Math.PI / 2;
-      d.position.y = 0.05;
+      d.position.y = 0.06;
       d.visible = false;
       this.root.add(d);
       this.guide.push(d);
     }
 
-    for (const def of PADS) {
+    for (const def of PLOTS) {
       const p = new Plot(def);
+      const at = this.placeOf(def);
+      p.setPos(at.x, at.z);
       this.root.add(p.group);
       this.plots.push(p);
     }
 
-    // A little starting gold by the keep teaches the collect → build loop immediately.
-    for (let i = 0; i < 12; i++) this.dropCoin(v1.set(-2.75 + i * 0.5, 0.3, 4.4), 0.5);
-
-    hud.hint('Grab the gold, then stand on the plot to build');
+    // A little gold on the ground teaches the collect → build loop straight away.
+    for (let i = 0; i < 8; i++) this.dropCoin(v1.set(-1.75 + i * 0.5, 0.3, 7.2), 0.4);
   }
 
-  // ------------------------------------------------------------------ helpers
+  private get roads(): Road[] {
+    return this.world.roads;
+  }
 
-  get heroDamage() {
-    return FORGE_LEVELS[this.forge].damage;
+  // ------------------------------------------------------------------ placement helpers
+
+  /** World position of a plot's pad. On-road structures put their pad on the roadside. */
+  placeOf(def: PlotDef) {
+    return this.resolve(def.place, def.kind === 'post' || def.kind === 'barricade');
+  }
+
+  private resolve(place: Place, roadside = false) {
+    if ('x' in place) return new THREE.Vector3(place.x, 0, place.z);
+    const r = this.roads[place.road];
+    const side = roadside ? ROADSIDE_PAD.side : place.side;
+    const dist = roadside ? ROADSIDE_PAD.dist : place.dist;
+    return r.point(r.length * place.t, side * dist, new THREE.Vector3());
+  }
+
+  /** Spots worth keeping clear of scenery. */
+  reservedSpots() {
+    const out: { x: number; z: number; r: number }[] = [{ x: 0, z: 0, r: 6 }];
+    for (const p of this.plots) {
+      out.push({ x: p.pos.x, z: p.pos.z, r: 3 });
+      if (p.def.kind === 'tower') {
+        const far = this.towerPadAfter(p.def);
+        out.push({ x: far.x, z: far.z, r: 3 });
+      }
+      const after = SHOP_PAD_AFTER[p.def.id];
+      if (after) out.push({ x: after.x, z: after.z, r: 3 });
+      if (p.def.kind in SHOP_MAKERS) out.push({ x: p.pos.x, z: p.pos.z, r: 5 });
+    }
+    return out;
+  }
+
+  private towerPadAfter(def: PlotDef) {
+    const pl = def.place as { road: number; t: number; side: number; dist: number };
+    return this.resolve({ ...pl, dist: pl.dist + 2.9 });
+  }
+
+  // ------------------------------------------------------------------ small utilities
+
+  private makeItemStack(geo: THREE.BufferGeometry) {
+    const im = new THREE.InstancedMesh(geo, M.MAT.white, PLAYER.maxWeapons);
+    im.count = 0;
+    im.castShadow = true;
+    im.frustumCulled = false;
+    im.setColorAt(0, col.setRGB(1, 1, 1));
+    this.hero.frontAnchor.add(im);
+    return im;
   }
 
   private stackTop(out: THREE.Vector3) {
     const n = Math.min(this.carry, PLAYER.maxVisibleStack);
     out.set(0, n * 0.11 + 0.05, 0);
-    return this.hero.stackAnchor.localToWorld(out);
+    return this.hero.backAnchor.localToWorld(out);
+  }
+
+  private frontTop(out: THREE.Vector3) {
+    out.set(0, this.weapons.length * 0.1, 0.1);
+    return this.hero.frontAnchor.localToWorld(out);
   }
 
   private dropCoin(at: THREE.Vector3, spread = 2.5) {
@@ -249,25 +394,43 @@ export class Run {
     c.vel.set(Math.cos(a) * s, 4 + Math.random() * 2.5, Math.sin(a) * s);
   }
 
+  private gainCoin() {
+    this.carry++;
+    this.pickupCombo++;
+    this.pickupComboT = 0.6;
+    this.sfx.pickup(this.pickupCombo);
+    this.hud.bumpGold();
+  }
+
+  isBuilt(id: string) {
+    const p = this.plots.find((q) => q.def.id === id);
+    return !!p && p.level > 0;
+  }
+
   // ------------------------------------------------------------------ main update
 
   update(dt: number, move: { x: number; y: number }) {
     if (this.over) return;
     this.time += dt;
     this.updateHero(dt, move);
-    this.updateSquires(dt);
-    this.updateWaves(dt);
+    this.updateWaves();
     this.updateEnemies(dt);
+    this.updateUnits(dt);
     this.updateTowers(dt);
-    this.updateWalls(dt);
-    this.updateMines(dt);
+    this.updatePosts();
+    this.updateBarricades(dt);
+    this.updateShops(dt);
+    this.updateWeapons(dt);
     this.updateArrows(dt);
+    this.updateBolts(dt);
     this.updateCoins(dt);
     this.updatePlots(dt);
-    this.updateKeep(dt);
+    this.updateHall(dt);
     this.updateGuide();
-    this.updateStack(dt);
+    this.updateStacks(dt);
+    this.drawCrowd();
     this.hud.setGold(this.carry);
+    this.hud.hint(this.currentHint());
   }
 
   // ------------------------------------------------------------------ hero
@@ -277,51 +440,37 @@ export class Run {
     if (!this.heroAlive) {
       this.respawnT -= dt;
       rig.root.visible = false;
-      this.hud.hint(`Respawning in ${Math.ceil(this.respawnT)}…`);
       if (this.respawnT <= 0) {
         this.heroAlive = true;
         this.heroHp = PLAYER.maxHp;
-        this.heroPos.set(0, 0, 3.2);
+        this.heroPos.set(0, 0, 5.5);
         rig.root.visible = true;
         this.fx.burst(v1.copy(this.heroPos).setY(1), COLORS.coin, 14, 4);
-        this.hud.hint(this.tutorialDone ? '' : 'Grab the gold, then stand on the plot to build');
       }
       this.hud.placeBar(this.heroBar, null, 0);
       return;
     }
 
-    // Movement: screen-space stick maps directly to world x/z (camera never rotates).
     const speed = PLAYER.speed;
     this.heroVel.set(move.x * speed, 0, move.y * speed);
     this.heroPos.addScaledVector(this.heroVel, dt);
-    const lim = SPAWN_RADIUS - 2;
-    const d = Math.hypot(this.heroPos.x, this.heroPos.z);
-    if (d > lim) this.heroPos.multiplyScalar(lim / d);
-    // Don't walk through the keep.
-    const kd = Math.hypot(this.heroPos.x, this.heroPos.z);
-    if (kd < 2.4) {
-      this.heroPos.multiplyScalar(2.4 / Math.max(kd, 0.001));
-      // Slide around the walls instead of sticking when pushing straight into them.
-      const tx = -this.heroPos.z / 2.4;
-      const tz = this.heroPos.x / 2.4;
-      const along = this.heroVel.x * tx + this.heroVel.z * tz;
-      const side = Math.abs(along) > 0.1 ? Math.sign(along) : this.heroPos.x >= 0 ? -1 : 1;
-      this.heroPos.x += tx * side * speed * 0.6 * dt;
-      this.heroPos.z += tz * side * speed * 0.6 * dt;
-    }
+    this.heroPos.x = THREE.MathUtils.clamp(this.heroPos.x, -40, 48);
+    this.heroPos.z = THREE.MathUtils.clamp(this.heroPos.z, -54, 22);
+    this.pushOutOfBuildings(this.heroPos, 0.45);
 
     const moving = this.heroVel.lengthSq() > 0.01;
-    if (moving) this.walkT += dt * 11;
-    else this.walkT = 0;
+    if (moving) {
+      this.walkT += dt * 11;
+      this.moveDir.copy(this.heroVel).normalize();
+    } else this.walkT = 0;
 
-    // Shooting
     this.heroCd -= dt;
-    const target = this.nearestEnemy(this.heroPos, PLAYER.range);
+    const target = this.nearestEnemy(this.heroPos.x, this.heroPos.z, PLAYER.range);
     let face = moving ? Math.atan2(this.heroVel.x, this.heroVel.z) : this.heroFacing;
     if (target) {
-      face = Math.atan2(target.pos.x - this.heroPos.x, target.pos.z - this.heroPos.z);
+      face = Math.atan2(target.x - this.heroPos.x, target.z - this.heroPos.z);
       if (this.heroCd <= 0) {
-        this.heroCd = FORGE_LEVELS[this.forge].delay;
+        this.heroCd = PLAYER.fireDelay;
         rig.muzzle.getWorldPosition(v1);
         this.fire(v1, target, this.heroDamage);
         this.sfx.shoot();
@@ -337,163 +486,170 @@ export class Run {
     rig.body.position.y = Math.abs(sw) * 0.06;
     rig.body.rotation.z = sw * 0.04;
 
-    // Regenerate inside the territory.
-    if (Math.hypot(this.heroPos.x, this.heroPos.z) < this.world.currentRadius) {
-      this.heroHp = Math.min(PLAYER.maxHp, this.heroHp + PLAYER.regen * dt);
-    }
+    if (this.time - this.heroLastHit > 3) this.heroHp = Math.min(PLAYER.maxHp, this.heroHp + PLAYER.regen * dt);
     this.heroHurt = Math.max(0, this.heroHurt - dt * 4);
-    M.MAT.tabard.emissive.setRGB(this.heroHurt * 0.8, 0, 0);
-
+    M.MAT.team.emissive.setRGB(this.heroHurt * 0.8, 0, 0);
     const frac = this.heroHp / PLAYER.maxHp;
-    this.hud.placeBar(this.heroBar, frac < 0.999 ? v1.copy(this.heroPos).setY(2.6) : null, frac);
+    this.hud.placeBar(this.heroBar, frac < 0.999 ? v1.copy(this.heroPos).setY(2.7) : null, frac);
+  }
+
+  get heroDamage() {
+    const forge = this.shops.get('forge');
+    return PLAYER.baseDamage + (forge ? forge.level * 8 : 0);
+  }
+
+  /** Keeps a walker out of the hall and building footprints. */
+  private pushOutOfBuildings(p: THREE.Vector3, r: number) {
+    const solid: [number, number, number][] = [[0, -0.2, HALL.radius]];
+    for (const s of this.shops.values()) solid.push([s.pos.x, s.pos.z - 0.2, 1.9]);
+    for (const t of this.towers.values()) solid.push([t.pos.x, t.pos.z, 1.15]);
+    for (const [x, z, rad] of solid) {
+      const dx = p.x - x;
+      const dz = p.z - z;
+      const d = Math.hypot(dx, dz);
+      const min = rad + r;
+      if (d < min && d > 1e-4) {
+        p.x = x + (dx / d) * min;
+        p.z = z + (dz / d) * min;
+      }
+    }
   }
 
   private damageHero(dmg: number) {
     if (!this.heroAlive) return;
     this.heroHp -= dmg;
     this.heroHurt = 1;
+    this.heroLastHit = this.time;
     this.sfx.hurt();
-    this.fx.text(v1.copy(this.heroPos).setY(2.2), `-${dmg}`, 'hurt');
     if (this.heroHp <= 0) {
       this.heroAlive = false;
       this.respawnT = PLAYER.respawnTime;
-      this.fx.burst(v1.copy(this.heroPos).setY(1), COLORS.tabard, 20, 5);
+      this.fx.burst(v1.copy(this.heroPos).setY(1), COLORS.team, 20, 5);
       this.fx.shake = Math.max(this.fx.shake, 0.6);
       this.events.haptic(true);
-      // Drop half the stack where you fell.
+      this.hud.banner('Knocked out!', true);
       const lose = Math.floor(this.carry / 2);
       this.carry -= lose;
       for (let i = 0; i < Math.min(lose, 60); i++) this.dropCoin(v1.copy(this.heroPos).setY(1.2), 3.5);
     }
   }
 
-  private updateStack(dt: number) {
+  private updateStacks(dt: number) {
+    // Gold tower on the back, leaning with momentum.
     const n = Math.min(this.carry, PLAYER.maxVisibleStack);
     this.stack.count = n;
-    // Lean the tower against the direction of travel, with a springy lag.
     const tx = this.heroAlive ? -this.heroVel.x * 0.006 : 0;
     const tz = this.heroAlive ? -this.heroVel.z * 0.006 : 0;
     this.stackLean.x += (tx - this.stackLean.x) * Math.min(1, dt * 6);
     this.stackLean.y += (tz - this.stackLean.y) * Math.min(1, dt * 6);
-    // Lean is world-space; convert into the hero's local frame.
     const c = Math.cos(-this.heroFacing);
     const s = Math.sin(-this.heroFacing);
     const lx = this.stackLean.x * c + this.stackLean.y * s;
     const lz = -this.stackLean.x * s + this.stackLean.y * c;
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
     for (let i = 0; i < n; i++) {
       const f = (i / PLAYER.maxVisibleStack) ** 2 * 35;
       const wob = Math.sin(this.time * 2.5 + i * 0.12) * 0.0015 * i;
       v1.set(lx * f + wob, i * 0.11, lz * f);
-      q.setFromAxisAngle(UP, i * 0.4);
-      m.compose(v1, q, v2.set(1, 1, 1));
-      this.stack.setMatrixAt(i, m);
+      quat.setFromAxisAngle(UP, i * 0.4);
+      mtx.compose(v1, quat, scl.set(1, 1, 1));
+      this.stack.setMatrixAt(i, mtx);
     }
     this.stack.instanceMatrix.needsUpdate = true;
-  }
 
-  // ------------------------------------------------------------------ squires
-
-  private addSquire() {
-    const rig = M.makeSquire();
-    const pos = this.heroPos.clone();
-    rig.root.position.copy(pos);
-    this.root.add(rig.root);
-    this.squires.push({ rig, pos, cd: Math.random() * 0.5, facing: 0 });
-  }
-
-  private updateSquires(dt: number) {
-    const n = this.squires.length;
-    this.squires.forEach((sq, i) => {
-      // Formation: a loose arc trailing the hero.
-      const a = this.heroFacing + Math.PI + (n > 1 ? (i / (n - 1) - 0.5) * 2.2 : 0);
-      v1.set(this.heroPos.x + Math.sin(a) * 1.5, 0, this.heroPos.z + Math.cos(a) * 1.5);
-      const prev = sq.pos.clone();
-      sq.pos.lerp(v1, Math.min(1, dt * 6));
-      const moved = prev.distanceTo(sq.pos);
-
-      sq.cd -= dt;
-      const t = this.nearestEnemy(sq.pos, SQUIRE.range);
-      let face = moved > 0.005 ? Math.atan2(sq.pos.x - prev.x, sq.pos.z - prev.z) : sq.facing;
-      if (t) {
-        face = Math.atan2(t.pos.x - sq.pos.x, t.pos.z - sq.pos.z);
-        if (sq.cd <= 0) {
-          sq.cd = SQUIRE.delay;
-          sq.rig.muzzle.getWorldPosition(v2);
-          this.fire(v2, t, SQUIRE.damage);
-        }
-      }
-      sq.facing = lerpAngle(sq.facing, face, Math.min(1, dt * 10));
-      sq.rig.root.position.copy(sq.pos);
-      sq.rig.root.position.y = moved > 0.01 ? Math.abs(Math.sin(this.time * 14 + i)) * 0.1 : 0;
-      sq.rig.root.rotation.y = sq.facing;
-      sq.rig.root.visible = this.heroAlive;
+    // Weapons carried in the arms, lying crosswise.
+    let si = 0;
+    let bi = 0;
+    this.weapons.forEach((w, i) => {
+      const im = w.kind === 'sword' ? this.swordStack : this.bowStack;
+      const idx = w.kind === 'sword' ? si++ : bi++;
+      v1.set(0, i * 0.1, 0);
+      quat.setFromEuler(eul.set(Math.PI / 2, 0, Math.PI / 2, 'XYZ'));
+      mtx.compose(v1, quat, scl.set(1, 1, 1));
+      im.setMatrixAt(idx, mtx);
+      const tiers = w.kind === 'sword' ? SWORD_TIERS : BOW_TIERS;
+      im.setColorAt(idx, col.set(tiers[w.tier].color));
     });
+    this.swordStack.count = si;
+    this.bowStack.count = bi;
+    for (const im of [this.swordStack, this.bowStack]) {
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    }
   }
 
-  // ------------------------------------------------------------------ waves & enemies
+  // ------------------------------------------------------------------ waves
 
-  private updateWaves(dt: number) {
-    if (this.spawnQueue.length === 0) {
-      const alive = this.enemies.length;
-      const ready = this.wave === 0 || alive <= 2 || this.time - this.lastSpawn > 22;
-      if (ready) {
-        this.waveBreak -= dt;
-        if (this.waveBreak <= 0) this.startWave(this.wave + 1);
-      }
-    } else {
-      this.spawnT -= dt;
-      if (this.spawnT <= 0) {
-        this.spawnT = this.spawnInterval * (0.6 + Math.random() * 0.8);
-        this.spawn(this.spawnQueue.shift()!);
-        this.waveSpawned++;
-        this.lastSpawn = this.time;
-      }
+  private updateWaves() {
+    // Spawn whatever is due.
+    while (this.queue.length && this.queue[0].at <= this.time) {
+      const it = this.queue.shift()!;
+      this.spawn(it.kind, it.road);
+      this.waveSpawned++;
     }
-    const progress = this.wave === 0 ? 0 : this.waveSpawned / this.waveTotal;
-    this.hud.setWave(Math.max(1, this.wave), progress);
+    if (this.queue.length === 0 && this.time >= this.nextWaveAt) {
+      const elapsed = this.time - this.waveStart;
+      if (this.wave === 0 || this.enemies.length <= 6 || elapsed > WAVES.duration + 14) this.startWave(this.wave + 1);
+    }
+    this.hud.setWave(Math.max(1, this.wave), this.wave === 0 ? 0 : this.waveSpawned / this.waveTotal);
   }
 
   private startWave(n: number) {
     this.wave = n;
-    this.waveBreak = WAVES.breakTime;
-    const count = WAVES.baseCount + (n - 1) * WAVES.countPerWave;
-    const q: EnemyKind[] = [];
-    for (let i = 0; i < count; i++) q.push(n >= 3 && Math.random() < 0.3 ? 'runner' : 'goblin');
-    const trolls = n % 3 === 0 ? Math.floor(n / 3) : n >= 10 ? 1 : 0;
-    for (let i = 0; i < trolls; i++) q.splice(Math.floor(q.length * (0.35 + 0.5 * (i / Math.max(1, trolls)))), 0, 'troll');
-    this.spawnQueue = q;
-    this.waveTotal = q.length;
+    this.waveStart = this.time;
+    this.nextWaveAt = this.time + WAVES.duration + WAVES.breakTime;
+    if (n >= WAVES.roadBWave && !this.roadBOpen) {
+      this.roadBOpen = true;
+      this.world.openRoad(1, true);
+      this.hud.banner('Goblins on the east road!', true);
+      this.sfx.boss();
+    }
+    const total = WAVES.baseCount + (n - 1) * WAVES.countPerWave;
+    const trolls = n % 4 === 0 ? Math.ceil(n / 4) : n >= 10 && n % 2 === 0 ? 1 : 0;
+    const items: SpawnItem[] = [];
+    // Enemies arrive in packs that string out along the road.
+    let left = total;
+    let t = this.time + 0.5;
+    const packs = Math.max(2, Math.round(total / 14));
+    const gap = (WAVES.duration * 0.8) / packs;
+    for (let p = 0; p < packs && left > 0; p++) {
+      const size = p === packs - 1 ? left : Math.min(left, Math.round(total / packs));
+      left -= size;
+      const road = this.roadBOpen && p % 3 === 1 ? 1 : 0;
+      for (let i = 0; i < size; i++) {
+        const kind: EnemyKind = n >= 3 && Math.random() < 0.25 ? 'runner' : 'goblin';
+        items.push({ at: t + i * 0.12, kind, road });
+      }
+      t += gap;
+    }
+    for (let i = 0; i < trolls; i++) {
+      items.push({ at: this.time + 4 + i * 5, kind: 'troll', road: this.roadBOpen && i % 2 ? 1 : 0 });
+    }
+    items.sort((a, b) => a.at - b.at);
+    this.queue = items;
+    this.waveTotal = items.length;
     this.waveSpawned = 0;
-    this.spawnInterval = Math.max(0.22, Math.min(1.3, 15 / q.length));
-    this.spawnT = 0.5;
-    this.hud.banner(trolls ? `Wave ${n} — Troll!` : `Wave ${n}`, trolls > 0);
-    if (trolls) this.sfx.boss();
-    else this.sfx.wave();
+    if (trolls) {
+      this.hud.banner(`Wave ${n}: Troll!`, true);
+      this.sfx.boss();
+    } else if (!(n === WAVES.roadBWave)) {
+      this.hud.banner(`Wave ${n}`, false);
+      this.sfx.wave();
+    }
   }
 
-  private spawn(kind: EnemyKind) {
+  private spawn(kind: EnemyKind, road: number) {
+    if (this.enemies.filter((e) => e.kind === kind).length >= MAX_ENEMIES[kind]) return;
     const type = ENEMIES[kind];
-    const rig = this.enemyPool[kind].pop() ?? M.makeEnemy(kind, type.color);
-    const arc = WAVES.arc(this.wave);
-    // Bias spawns toward the roads so groups arrive in readable lanes.
-    const roads = [0, 120, -120].filter((r) => Math.abs(r) <= arc);
-    let deg = (Math.random() * 2 - 1) * arc;
-    if (roads.length && Math.random() < 0.6) deg = roads[Math.floor(Math.random() * roads.length)] + (Math.random() - 0.5) * 24;
-    const a = (deg * Math.PI) / 180;
-    const pos = new THREE.Vector3(Math.sin(a) * SPAWN_RADIUS, 0, -Math.cos(a) * SPAWN_RADIUS);
-    const hp = Math.round(type.hp * (1 + WAVES.hpGrowth * (this.wave - 1)) * (type.boss ? 1 + this.wave * 0.08 : 1));
-    rig.root.position.copy(pos);
-    rig.root.visible = true;
-    rig.root.scale.setScalar(1);
-    for (const m of rig.mats) m.emissive.setRGB(0, 0, 0);
-    this.root.add(rig.root);
-    this.enemies.push({
+    const hp = Math.round(type.hp * (1 + WAVES.hpGrowth * (this.wave - 1)) * (type.boss ? 1 + this.wave * 0.06 : 1));
+    const e: Enemy = {
       kind,
       type,
-      rig,
-      pos,
+      road,
+      s: Math.random() * 0.8,
+      off: (Math.random() * 2 - 1) * (ROAD_HALF_WIDTH - 0.5),
+      x: 0,
+      z: 0,
+      facing: 0,
       hp,
       maxHp: hp,
       alive: true,
@@ -501,19 +657,24 @@ export class Run {
       lunge: 0,
       flash: 0,
       phase: Math.random() * 10,
+      moving: true,
       bar: type.boss ? this.hud.worldBar('enemy big') : null,
-    });
+    };
+    this.roads[road].point(e.s, e.off, v1);
+    e.x = v1.x;
+    e.z = v1.z;
+    this.enemies.push(e);
     if (type.boss) this.fx.shake = Math.max(this.fx.shake, 0.4);
   }
 
-  private nearestEnemy(from: THREE.Vector3, range: number, skip?: Enemy) {
+  // ------------------------------------------------------------------ enemies
+
+  nearestEnemy(x: number, z: number, range: number, skip?: Enemy) {
     let best: Enemy | null = null;
     let bd = range * range;
     for (const e of this.enemies) {
       if (!e.alive || e === skip) continue;
-      const dx = e.pos.x - from.x;
-      const dz = e.pos.z - from.z;
-      const d = dx * dx + dz * dz;
+      const d = (e.x - x) ** 2 + (e.z - z) ** 2;
       if (d < bd) {
         bd = d;
         best = e;
@@ -522,115 +683,160 @@ export class Run {
     return best;
   }
 
-  /** Returns the wall an enemy at (x,z) with radius r would overlap, if any. */
-  private blockingWall(x: number, z: number, r: number) {
-    for (const w of this.walls) {
-      if (!w.alive) continue;
-      const dx = x - w.spec.x;
-      const dz = z - w.spec.z;
-      const along = dx * w.tx + dz * w.tz;
-      const across = -dx * w.tz + dz * w.tx;
-      if (Math.abs(along) < w.spec.len / 2 + r && Math.abs(across) < 0.3 + r) return w;
-    }
-    return null;
+  private gridKey(x: number, z: number) {
+    return (Math.floor(x / 1.6) + 512) * 4096 + (Math.floor(z / 1.6) + 512);
   }
 
   private updateEnemies(dt: number) {
-    const list = this.enemies;
-    for (const e of list) {
-      if (!e.alive) continue;
-      const t = e.type;
-      e.atkCd -= dt;
-      e.lunge = Math.max(0, e.lunge - dt * 4);
-      e.flash = Math.max(0, e.flash - dt * 8);
-
-      // Choose a target: the hero if close, otherwise the keep.
-      const hdx = this.heroPos.x - e.pos.x;
-      const hdz = this.heroPos.z - e.pos.z;
-      const hd = Math.hypot(hdx, hdz);
-      const chaseHero = this.heroAlive && hd < (t.boss ? 6 : 4.5);
-      let tx: number, tz: number, reach: number;
-      if (chaseHero) {
-        tx = this.heroPos.x;
-        tz = this.heroPos.z;
-        reach = t.radius + 0.55;
-      } else {
-        tx = 0;
-        tz = 0;
-        reach = t.radius + KEEP.radius;
-      }
-      const dx = tx - e.pos.x;
-      const dz = tz - e.pos.z;
-      const dist = Math.hypot(dx, dz) || 1;
-      const nx = dx / dist;
-      const nz = dz / dist;
-      let attacking = false;
-
-      if (dist <= reach) {
-        attacking = true;
-        if (e.atkCd <= 0) {
-          e.atkCd = t.boss ? 1.4 : 1.0;
-          e.lunge = 1;
-          if (chaseHero) this.damageHero(t.damage);
-          else this.damageKeep(t.damage);
-        }
-      } else {
-        const step = t.speed * dt;
-        const nxp = e.pos.x + nx * step;
-        const nzp = e.pos.z + nz * step;
-        const wall = this.blockingWall(nxp, nzp, t.radius);
-        if (wall) {
-          attacking = true;
-          if (e.atkCd <= 0) {
-            e.atkCd = t.boss ? 1.4 : 1.0;
-            e.lunge = 1;
-            this.damageWall(wall, t.damage);
-          }
-        } else {
-          e.pos.x = nxp;
-          e.pos.z = nzp;
-        }
-      }
-
-      // Soft separation so crowds spread out instead of stacking.
-      for (const o of list) {
-        if (o === e || !o.alive) continue;
-        const sx = e.pos.x - o.pos.x;
-        const sz = e.pos.z - o.pos.z;
-        const min = t.radius + o.type.radius;
-        const d2 = sx * sx + sz * sz;
-        if (d2 < min * min && d2 > 1e-6) {
-          const d = Math.sqrt(d2);
-          const push = ((min - d) / d) * (o.type.boss && !t.boss ? 0.9 : 0.5);
-          const px = sx * push;
-          const pz = sz * push;
-          if (!this.blockingWall(e.pos.x + px, e.pos.z + pz, t.radius)) {
-            e.pos.x += px;
-            e.pos.z += pz;
-          }
-        }
-      }
-
-      // Animate
-      const r = e.rig.root;
-      r.position.set(e.pos.x, 0, e.pos.z);
-      r.rotation.y = Math.atan2(nx, nz);
-      const hop = attacking ? 0 : Math.abs(Math.sin(this.time * (t.boss ? 5 : 11) + e.phase));
-      e.rig.body.position.y = hop * (t.boss ? 0.12 : 0.18);
-      e.rig.body.position.z = e.lunge * (t.boss ? 0.6 : 0.35);
-      e.rig.body.rotation.x = e.lunge * 0.4;
-      for (const m of e.rig.mats) m.emissive.setScalar(e.flash * 0.8);
-      if (e.bar) this.hud.placeBar(e.bar, v1.set(e.pos.x, 3.4, e.pos.z), e.hp / e.maxHp);
+    // Spatial hash for separation.
+    this.grid.clear();
+    for (const e of this.enemies) {
+      const k = this.gridKey(e.x, e.z);
+      let cell = this.grid.get(k);
+      if (!cell) this.grid.set(k, (cell = []));
+      cell.push(e);
     }
 
-    // Remove the dead and recycle their rigs.
-    for (let i = list.length - 1; i >= 0; i--) {
-      const e = list[i];
+    const knights = this.units.filter((u) => u.type === 'knight' && u.state === 'station' && u.home);
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const t = e.type;
+      const road = this.roads[e.road];
+      e.atkCd -= dt;
+      e.lunge = Math.max(0, e.lunge - dt * 4);
+      e.flash = Math.max(0, e.flash - dt * 7);
+
+      let blocked = false;
+      let attack: (() => void) | null = null;
+      let faceX = 0;
+      let faceZ = 0;
+
+      // 1. The hero, if standing in the way.
+      const hd = Math.hypot(this.heroPos.x - e.x, this.heroPos.z - e.z);
+      if (this.heroAlive && hd < t.radius + 0.7) {
+        blocked = true;
+        faceX = this.heroPos.x - e.x;
+        faceZ = this.heroPos.z - e.z;
+        attack = () => this.damageHero(t.damage);
+      }
+      // 2. Knights holding the road.
+      if (!blocked) {
+        for (const k of knights) {
+          const post = k.home as Post;
+          if (post.road !== e.road) continue;
+          const ahead = k.roadS - e.s;
+          if (ahead > -0.2 && ahead < t.radius + 0.6 && Math.abs(k.roadOff - e.off) < 0.75 + t.radius) {
+            blocked = true;
+            faceX = k.pos.x - e.x;
+            faceZ = k.pos.z - e.z;
+            attack = () => this.damageKnight(k, t.damage);
+            break;
+          }
+        }
+      }
+      // 3. Barricades.
+      if (!blocked) {
+        for (const b of this.barricades.values()) {
+          if (!b.alive || b.road !== e.road) continue;
+          const ahead = b.s - e.s;
+          if (ahead > -0.3 && ahead < t.radius + 0.35) {
+            blocked = true;
+            attack = () => this.damageBarricade(b, t.damage);
+            break;
+          }
+        }
+      }
+      // 4. Reaching the hall: one heavy hit, then the goblin is gone (no reward).
+      if (!blocked && e.s >= road.length - 0.3) {
+        this.damageHall(t.damage * 3);
+        e.alive = false;
+        this.fx.burst(v1.set(e.x, 1, e.z), COLORS.wood, 6, 3);
+        continue;
+      }
+
+      if (blocked) {
+        if (attack && e.atkCd <= 0) {
+          e.atkCd = t.boss ? 1.4 : 1.0;
+          e.lunge = 1;
+          attack();
+        }
+      } else {
+        e.s += t.speed * dt;
+      }
+      e.moving = !blocked;
+
+      // Separation: push apart in the plane, then fold the push back into (s, off).
+      let px = 0;
+      let pz = 0;
+      const gx = Math.floor(e.x / 1.6) + 512;
+      const gz = Math.floor(e.z / 1.6) + 512;
+      for (let ix = -1; ix <= 1; ix++)
+        for (let iz = -1; iz <= 1; iz++) {
+          const cell = this.grid.get((gx + ix) * 4096 + gz + iz);
+          if (!cell) continue;
+          for (const o of cell) {
+            if (o === e || !o.alive) continue;
+            const sx = e.x - o.x;
+            const sz = e.z - o.z;
+            const min = t.radius + o.type.radius;
+            const d2 = sx * sx + sz * sz;
+            if (d2 < min * min && d2 > 1e-6) {
+              const d = Math.sqrt(d2);
+              const k = ((min - d) / d) * (o.type.boss && !t.boss ? 0.9 : 0.45);
+              px += sx * k;
+              pz += sz * k;
+            }
+          }
+        }
+      if (px || pz) {
+        road.tangent(e.s, v2);
+        let ds = px * v2.x + pz * v2.z;
+        const doff = px * -v2.z + pz * v2.x;
+        if (blocked && ds > 0) ds = 0;
+        e.s = Math.max(0, e.s + ds);
+        const lim = ROAD_HALF_WIDTH + (t.boss ? 0 : 0.4);
+        e.off = THREE.MathUtils.clamp(e.off + doff, -lim, lim);
+      }
+
+      road.point(e.s, e.off, v1);
+      e.x = v1.x;
+      e.z = v1.z;
+      if (faceX || faceZ) e.facing = Math.atan2(faceX, faceZ);
+      else {
+        road.tangent(e.s, v2);
+        e.facing = Math.atan2(v2.x, v2.z);
+      }
+      if (e.bar) this.hud.placeBar(e.bar, v1.set(e.x, 3.5, e.z), e.hp / e.maxHp);
+    }
+
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
       if (e.alive) continue;
-      this.root.remove(e.rig.root);
-      this.enemyPool[e.kind].push(e.rig);
       if (e.bar) this.hud.removeBar(e.bar);
-      list.splice(i, 1);
+      this.enemies.splice(i, 1);
+    }
+  }
+
+  private drawCrowd() {
+    const counts: Record<EnemyKind, number> = { goblin: 0, runner: 0, troll: 0 };
+    for (const e of this.enemies) {
+      const im = this.crowd[e.kind];
+      const i = counts[e.kind]++;
+      const hop = e.moving ? Math.abs(Math.sin(this.time * (e.type.boss ? 5 : 12) + e.phase)) : 0;
+      const sq = 1 + e.flash * 0.18;
+      const fwd = e.lunge * (e.type.boss ? 0.5 : 0.3);
+      v1.set(e.x + Math.sin(e.facing) * fwd, hop * (e.type.boss ? 0.12 : 0.2), e.z + Math.cos(e.facing) * fwd);
+      quat.setFromEuler(eul.set(e.lunge * 0.35, e.facing, Math.sin(this.time * 12 + e.phase) * 0.08 * (e.moving ? 1 : 0), 'YXZ'));
+      mtx.compose(v1, quat, scl.set(sq, 1 / sq + hop * 0.06, sq));
+      im.setMatrixAt(i, mtx);
+      const b = 1 + e.flash * 1.6;
+      im.setColorAt(i, col.setRGB(b, b, b));
+    }
+    for (const kind of ['goblin', 'runner', 'troll'] as EnemyKind[]) {
+      const im = this.crowd[kind];
+      im.count = counts[kind];
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
     }
   }
 
@@ -638,14 +844,16 @@ export class Run {
     if (!e.alive) return;
     e.hp -= dmg;
     e.flash = 1;
-    this.fx.text(v1.set(e.pos.x, e.type.boss ? 3.0 : 1.6, e.pos.z), `-${dmg}`, dmg >= 50 ? 'crit' : '');
+    this.fx.text(v1.set(e.x, e.type.boss ? 3.0 : 1.7, e.z), `-${dmg}`, dmg >= 45 ? 'crit' : '');
     this.sfx.hit();
     if (e.hp <= 0) {
       e.alive = false;
-      v1.set(e.pos.x, 0.8, e.pos.z);
-      this.fx.burst(v1, e.type.color, e.type.boss ? 30 : 10, e.type.boss ? 6 : 4, e.type.boss ? 1.6 : 1);
+      v1.set(e.x, 0.8, e.z);
+      this.fx.burst(v1, e.kind === 'troll' ? COLORS.troll : COLORS.goblin, e.type.boss ? 30 : 7, e.type.boss ? 6 : 4, e.type.boss ? 1.6 : 1);
       this.sfx.pop();
-      for (let i = 0; i < e.type.reward; i++) this.dropCoin(v1, e.type.boss ? 4 : 2);
+      let coins = Math.floor(e.type.coin);
+      if (Math.random() < e.type.coin - coins) coins++;
+      for (let i = 0; i < coins; i++) this.dropCoin(v1, e.type.boss ? 4 : 1.6);
       if (e.type.boss) {
         this.fx.shake = Math.max(this.fx.shake, 0.8);
         this.events.haptic(true);
@@ -654,7 +862,7 @@ export class Run {
     }
   }
 
-  // ------------------------------------------------------------------ arrows
+  // ------------------------------------------------------------------ projectiles
 
   private fire(from: THREE.Vector3, target: Enemy, damage: number) {
     const a = this.arrows.find((q) => !q.active);
@@ -666,16 +874,16 @@ export class Run {
     a.mesh.visible = true;
     a.pos.copy(from);
     a.target = target;
-    a.aim.set(target.pos.x, target.type.boss ? 1.4 : 0.7, target.pos.z);
+    a.aim.set(target.x, target.type.boss ? 1.4 : 0.8, target.z);
     a.damage = damage;
     a.mesh.position.copy(from);
   }
 
   private updateArrows(dt: number) {
-    const speed = 26;
+    const speed = 30;
     for (const a of this.arrows) {
       if (!a.active) continue;
-      if (a.target?.alive) a.aim.set(a.target.pos.x, a.target.type.boss ? 1.4 : 0.7, a.target.pos.z);
+      if (a.target?.alive) a.aim.set(a.target.x, a.target.type.boss ? 1.4 : 0.8, a.target.z);
       v1.subVectors(a.aim, a.pos);
       const d = v1.length();
       const step = speed * dt;
@@ -688,6 +896,42 @@ export class Run {
       a.pos.addScaledVector(v1, step / d);
       a.mesh.position.copy(a.pos);
       a.mesh.lookAt(a.aim);
+    }
+  }
+
+  private fireBolt(from: THREE.Vector3, to: THREE.Vector3) {
+    const b = this.bolts.find((q) => !q.active);
+    if (!b) return;
+    b.active = true;
+    b.mesh.visible = true;
+    b.pos.copy(from);
+    b.dir.subVectors(to, from).setY(0).normalize();
+    b.left = BALLISTA.range + 4;
+    b.hits.clear();
+    b.mesh.position.copy(from);
+    b.mesh.lookAt(v1.copy(from).add(b.dir));
+  }
+
+  private updateBolts(dt: number) {
+    for (const b of this.bolts) {
+      if (!b.active) continue;
+      const step = 26 * dt;
+      b.pos.addScaledVector(b.dir, step);
+      b.pos.y = Math.max(0.9, b.pos.y - dt * 4);
+      b.left -= step;
+      b.mesh.position.copy(b.pos);
+      for (const e of this.enemies) {
+        if (!e.alive || b.hits.has(e)) continue;
+        if ((e.x - b.pos.x) ** 2 + (e.z - b.pos.z) ** 2 < (e.type.radius + 0.5) ** 2) {
+          b.hits.add(e);
+          this.hitEnemy(e, BALLISTA.damage);
+          if (b.hits.size >= BALLISTA.pierce) b.left = 0;
+        }
+      }
+      if (b.left <= 0) {
+        b.active = false;
+        b.mesh.visible = false;
+      }
     }
   }
 
@@ -715,31 +959,27 @@ export class Run {
       if (!this.heroAlive || c.age < 0.35) continue;
       const dx = p.x - this.heroPos.x;
       const dz = p.z - this.heroPos.z;
-      if (dx * dx + dz * dz < PLAYER.magnet * PLAYER.magnet) {
+      // Nearby coins snap to the hero; forgotten ones fly over on their own after a while.
+      const far = c.age > PLAYER.coinAutoCollect;
+      if (far || dx * dx + dz * dz < PLAYER.magnet * PLAYER.magnet) {
         c.active = false;
         c.mesh.visible = false;
-        this.fx.fly(
-          p.clone(),
-          () => this.stackTop(v2),
-          0.28,
-          1.2,
-          () => {
-            this.carry++;
-            this.pickupCombo++;
-            this.pickupComboT = 0.6;
-            this.sfx.pickup(this.pickupCombo);
-            this.hud.bumpGold();
-          },
-        );
+        this.fx.fly(p.clone(), () => this.stackTop(v3), far ? 0.7 : 0.28, far ? 3 : 1.2, () => this.gainCoin());
       }
     }
   }
 
   // ------------------------------------------------------------------ plots & building
 
+  private requirementsMet(def: PlotDef) {
+    return def.requires.every((r) => (r.startsWith('wave:') ? this.wave >= Number(r.slice(5)) : this.isBuilt(r)));
+  }
+
   private plotVisible(p: Plot) {
-    if (p.def.zone > this.zone || p.maxed) return false;
-    if (p.def.kind === 'wall') return !this.walls.find((w) => w.plot === p && w.alive);
+    if (p.maxed || !this.requirementsMet(p.def)) return false;
+    if (p.def.kind === 'barricade') return !this.barricades.get(p.def.id)?.alive;
+    if (p.def.kind === 'recruitArcher') return this.openSpots('archer') > 0;
+    if (p.def.kind === 'recruitKnight') return this.openSpots('knight') > 0;
     return true;
   }
 
@@ -750,7 +990,7 @@ export class Run {
       if (!p.shown || !this.heroAlive) continue;
       const dx = this.heroPos.x - p.pos.x;
       const dz = this.heroPos.z - p.pos.z;
-      if (dx * dx + dz * dz < 1.25 * 1.25) on = p;
+      if (dx * dx + dz * dz < 1.3 * 1.3) on = p;
     }
     if (on !== this.activePlot) {
       this.activePlot = on;
@@ -760,7 +1000,7 @@ export class Run {
     for (const p of this.plots) p.update(dt, p === on);
 
     if (on && this.carry > 0 && on.paid + on.pending < on.cost) {
-      // Pay faster the longer you stand there — a big stack drains in a satisfying rush.
+      // Pay faster the longer you stand there: a big stack drains in a satisfying rush.
       this.payStreak += dt;
       const rate = Math.min(45, 7 + this.payStreak * 26);
       this.payT += dt * rate;
@@ -770,7 +1010,7 @@ export class Run {
         on.pending++;
         const plot = on;
         const from = this.stackTop(new THREE.Vector3());
-        this.fx.fly(from, () => v2.set(plot.pos.x, 0.2, plot.pos.z), 0.22, 1.0, () => {
+        this.fx.fly(from, () => v3.set(plot.pos.x, 0.2, plot.pos.z), 0.22, 1.0, () => {
           plot.pending--;
           plot.paid++;
           plot.bump();
@@ -779,106 +1019,364 @@ export class Run {
         });
       }
     }
-    if (!this.tutorialDone && (this.plots[0].level > 0 || this.wave >= 2)) {
-      this.tutorialDone = true;
-      this.hud.hint('');
+  }
+
+  completePlot(p: Plot) {
+    const def = p.def;
+    const lvl = p.level;
+    p.level++;
+    p.paid = 0;
+    this.sfx.build();
+    this.events.haptic(false);
+    this.fx.burst(v1.set(p.pos.x, 0.6, p.pos.z), COLORS.coin, 16, 5);
+    this.fx.shake = Math.max(this.fx.shake, 0.2);
+
+    switch (def.kind) {
+      case 'tower':
+        this.buildTower(p, lvl);
+        break;
+      case 'post':
+        this.buildPost(p, lvl);
+        break;
+      case 'barricade':
+        this.buildBarricade(p);
+        p.level = 0; // can be rebuilt after it's smashed
+        break;
+      case 'range':
+      case 'barracks':
+      case 'forge':
+      case 'bowyer':
+        this.buildShop(p, def.kind, lvl);
+        break;
+      case 'recruitArcher':
+      case 'recruitKnight': {
+        const type: UnitType = def.kind === 'recruitArcher' ? 'archer' : 'knight';
+        const shop = this.shops.get(type === 'archer' ? 'range' : 'barracks')!;
+        this.spawnUnit(type, shop.rackWorld, 'follow');
+        this.fx.text(v2.copy(shop.rackWorld).setY(2.2), type === 'archer' ? 'Archer recruited!' : 'Knight recruited!', 'good');
+        break;
+      }
     }
   }
 
-  private completePlot(p: Plot) {
+  private buildTower(p: Plot, lvl: number) {
     const def = p.def;
-    const lvl = p.level; // the level being completed (0 = first build)
-    p.level++;
-    p.paid = 0;
-    const at = v1.set(p.pos.x, 0.6, p.pos.z);
-    this.sfx.build();
-    this.events.haptic(false);
-    this.fx.burst(at, COLORS.coin, 18, 5);
-    this.fx.shake = Math.max(this.fx.shake, 0.25);
+    let t = this.towers.get(def.id);
+    if (!t) {
+      const rig = M.makeTower();
+      const pos = this.resolve(def.place);
+      rig.root.position.copy(pos);
+      // Face the road.
+      const pl = def.place as { road: number; t: number };
+      const r = this.roads[pl.road];
+      const onRoad = r.point(r.length * pl.t, 0, new THREE.Vector3());
+      rig.root.rotation.y = Math.atan2(onRoad.x - pos.x, onRoad.z - pos.z);
+      this.root.add(rig.root);
+      t = { plot: p, pos, rig, level: 0, units: [null, null], ballistaCd: 0, grow: 0, label: this.hud.worldLabel('archer') };
+      this.towers.set(def.id, t);
+      const far = this.towerPadAfter(def);
+      p.setPos(far.x, far.z);
+      this.fx.text(v2.copy(pos).setY(3.5), 'Watchtower!', 'good');
+      // The very first tower comes with a free archer to show how towers work.
+      if (def.id === 'tw1') this.spawnUnit('archer', v2.set(2.5, 0, 4), 'follow', t);
+    } else {
+      t.level = Math.min(TOWER_LEVELS.length - 1, lvl);
+      t.rig.roof.visible = t.level >= 1;
+      t.rig.ballista.visible = TOWER_LEVELS[t.level].ballista;
+      t.grow = 0.4;
+      this.fx.text(v2.copy(t.pos).setY(4), TOWER_LEVELS[t.level].ballista ? 'Ballista mounted!' : '+1 archer slot', 'good');
+    }
+  }
 
-    switch (def.kind) {
-      case 'tower': {
-        let t = this.towers.get(def.id);
-        if (!t) {
-          const rig = M.makeTower();
-          rig.root.position.set(def.x, 0, def.z);
-          rig.root.rotation.y = Math.atan2(def.x, def.z) + Math.PI;
-          this.root.add(rig.root);
-          t = { rig, pos: new THREE.Vector3(def.x, 0, def.z), level: 0, cd: 0, grow: 0 };
-          this.towers.set(def.id, t);
-          // Move the upgrade plot beside the tower (tangentially, away from the north road).
-          const ang = Math.atan2(def.x, -def.z);
-          const dir = ang >= 0 ? 1 : -1;
-          p.setPos(def.x + Math.cos(ang) * 2.4 * dir, def.z + Math.sin(ang) * 2.4 * dir);
-          this.fx.text(v2.set(def.x, 3, def.z), 'Archer Tower!', 'good');
-        } else {
-          t.level = Math.min(TOWER_LEVELS.length - 1, lvl);
-          t.rig.banners.forEach((b, i) => (b.visible = i < t!.level));
-          this.fx.text(v2.set(def.x, 3.2, def.z), `Tower ${['I', 'II', 'III'][t.level]}`, 'good');
-        }
-        t.grow = 0;
-        break;
+  private buildPost(p: Plot, lvl: number) {
+    const def = p.def;
+    let post = this.posts.get(def.id);
+    if (!post) {
+      const pl = def.place as { road: number; t: number };
+      const road = this.roads[pl.road];
+      const s = road.length * pl.t;
+      const flag = M.makePostFlag();
+      const pos = road.point(s, ROAD_HALF_WIDTH + 0.7, new THREE.Vector3());
+      flag.position.copy(pos);
+      this.root.add(flag);
+      post = { plot: p, road: pl.road, s, level: 0, units: [null, null, null, null], flag, pos: road.point(s, 0, new THREE.Vector3()), label: this.hud.worldLabel('knight') };
+      this.posts.set(def.id, post);
+      this.fx.text(v2.copy(post.pos).setY(3), 'Guard Post!', 'good');
+    } else {
+      post.level = Math.min(POST_LEVELS.length - 1, lvl);
+      this.fx.text(v2.copy(post.pos).setY(3), '+2 knight slots', 'good');
+    }
+  }
+
+  private buildBarricade(p: Plot) {
+    const def = p.def;
+    let b = this.barricades.get(def.id);
+    if (!b) {
+      const pl = def.place as { road: number; t: number };
+      const road = this.roads[pl.road];
+      const s = road.length * pl.t;
+      const mesh = M.makeBarricade(ROAD_HALF_WIDTH * 2 + 0.6);
+      const pos = road.point(s, 0, new THREE.Vector3());
+      mesh.position.copy(pos);
+      road.tangent(s, v2);
+      mesh.rotation.y = Math.atan2(v2.x, v2.z);
+      this.root.add(mesh);
+      const hp = BARRICADE_HP[pl.road === 0 ? 0 : 1];
+      b = { plot: p, road: pl.road, s, hp, maxHp: hp, alive: true, mesh, pos, lastHit: -99, shake: 0, rise: 0 };
+      this.barricades.set(def.id, b);
+    }
+    b.alive = true;
+    b.hp = b.maxHp;
+    b.rise = 0;
+    b.mesh.visible = true;
+    this.fx.burst(v2.copy(b.pos).setY(0.5), COLORS.wood, 14, 4);
+  }
+
+  private buildShop(p: Plot, kind: Workshop['kind'], lvl: number) {
+    let shop = this.shops.get(p.def.id);
+    if (!shop) {
+      const rig = SHOP_MAKERS[kind]();
+      const pos = p.pos.clone();
+      rig.root.position.copy(pos);
+      this.root.add(rig.root);
+      let rackMesh: THREE.InstancedMesh | null = null;
+      const rackWorld = rig.rack.clone().add(pos);
+      if (kind === 'forge' || kind === 'bowyer') {
+        rackMesh = new THREE.InstancedMesh(kind === 'forge' ? M.GEO.sword : M.GEO.bow, M.MAT.white, WORKSHOP.rackMax);
+        rackMesh.count = 0;
+        rackMesh.castShadow = true;
+        rackMesh.frustumCulled = false;
+        rackMesh.setColorAt(0, col.setRGB(1, 1, 1));
+        rackMesh.position.copy(pos);
+        this.root.add(rackMesh);
       }
-      case 'wall': {
-        let w = this.walls.find((q) => q.plot === p);
-        const spec = def.wall!;
-        if (!w) {
-          const rig = M.makeWall(spec.len);
-          rig.root.position.set(spec.x, 0, spec.z);
-          rig.root.rotation.y = spec.rot;
-          this.root.add(rig.root);
-          const hp = WALL_HP[def.zone];
-          w = { spec, rig, hp, maxHp: hp, alive: true, lastHit: -99, tx: Math.cos(spec.rot), tz: -Math.sin(spec.rot), plot: p, shake: 0 };
-          this.walls.push(w);
+      shop = { plot: p, kind, rig, pos, level: 1, timer: 0, rack: [], rackMesh, rackWorld, pickT: 0, smokeT: 0 };
+      this.shops.set(p.def.id, shop);
+      const after = SHOP_PAD_AFTER[p.def.id];
+      if (after) p.setPos(after.x, after.z);
+      this.fx.text(v2.copy(pos).setY(4), SHOP_NAMES[kind], 'good');
+      // Recruits already queued at the hall pick up the new shop's spot.
+    } else {
+      shop.level = Math.min(WORKSHOP.interval.length, lvl + 1);
+      const tiers = kind === 'forge' ? SWORD_TIERS : BOW_TIERS;
+      this.fx.text(v2.copy(shop.pos).setY(4), `Now making: ${tiers[shop.level].name}`, 'good');
+    }
+  }
+
+  // ------------------------------------------------------------------ defenders
+
+  private spawnUnit(type: UnitType, at: THREE.Vector3, state: Unit['state'], home?: Tower) {
+    const rig = type === 'archer' ? M.makeArcher() : M.makeKnight();
+    const pos = at.clone().setY(0);
+    rig.root.position.copy(pos);
+    this.root.add(rig.root);
+    const u: Unit = {
+      type,
+      rig,
+      pos,
+      tier: 0,
+      state,
+      home: null,
+      slot: -1,
+      cd: Math.random() * 0.5,
+      hp: KNIGHT.maxHp,
+      lastHit: -99,
+      facing: Math.PI,
+      swing: 0,
+      roadS: 0,
+      roadOff: 0,
+    };
+    this.setTier(u, 0);
+    this.units.push(u);
+    if (home) this.assign(u, home);
+    this.fx.burst(v1.copy(pos).setY(0.8), COLORS.team, 10, 3);
+    return u;
+  }
+
+  private setTier(u: Unit, tier: number) {
+    u.tier = tier;
+    const tiers = u.type === 'archer' ? BOW_TIERS : SWORD_TIERS;
+    u.rig.weaponMat.color.set(tiers[tier].color);
+    u.rig.weaponMat.emissive.set(tier === 3 ? 0x6a4a00 : 0x000000);
+    if (u.type === 'knight') {
+      const maxHp = KNIGHT.maxHp + tier * KNIGHT.hpPerTier;
+      u.hp = maxHp;
+    }
+  }
+
+  private maxHp(u: Unit) {
+    return KNIGHT.maxHp + u.tier * KNIGHT.hpPerTier;
+  }
+
+  private slotsOf(h: Tower | Post) {
+    return 'rig' in h ? TOWER_LEVELS[h.level].slots : POST_LEVELS[h.level].slots;
+  }
+
+  /** Empty tower/post slots for a unit type, minus recruits already on their way. */
+  private openSpots(type: UnitType) {
+    const homes: (Tower | Post)[] = type === 'archer' ? [...this.towers.values()] : [...this.posts.values()];
+    let free = 0;
+    for (const h of homes) {
+      const n = this.slotsOf(h);
+      for (let i = 0; i < n; i++) if (!h.units[i]) free++;
+    }
+    return free - this.units.filter((u) => u.type === type && u.state === 'follow').length;
+  }
+
+  private freeSlot(h: Tower | Post) {
+    const n = this.slotsOf(h);
+    for (let i = 0; i < n; i++) if (!h.units[i]) return i;
+    return -1;
+  }
+
+  private assign(u: Unit, h: Tower | Post) {
+    const slot = this.freeSlot(h);
+    if (slot < 0) return false;
+    h.units[slot] = u;
+    u.home = h;
+    u.slot = slot;
+    u.state = 'walk';
+    if (!('rig' in h)) {
+      // Knight spots on the road: two abreast, the second pair one step behind.
+      u.roadS = h.s - (slot >= 2 ? 1.3 : 0);
+      u.roadOff = slot % 2 ? 0.85 : -0.85;
+    }
+    this.fx.text(v1.copy(u.pos).setY(2), u.type === 'archer' ? 'To the tower!' : 'Holding the road!', 'good');
+    return true;
+  }
+
+  /** Where a stationed unit stands (world space). */
+  private stationPos(u: Unit, out: THREE.Vector3) {
+    const h = u.home!;
+    if ('rig' in h) return h.rig.root.localToWorld(out.copy(h.rig.slots[u.slot]));
+    return this.roads[h.road].point(u.roadS, u.roadOff, out);
+  }
+
+  /** Ground point a unit walks to before taking its station. */
+  private approachPos(u: Unit, out: THREE.Vector3) {
+    const h = u.home!;
+    if ('rig' in h) {
+      // The foot of the ladder.
+      return h.rig.root.localToWorld(out.set(0, 0, 1.8));
+    }
+    return this.stationPos(u, out);
+  }
+
+  private updateUnits(dt: number) {
+    const followers = this.units.filter((u) => u.state === 'follow');
+    // Lead followers to any free tower/post nearby.
+    if (this.heroAlive) {
+      for (const u of followers) {
+        const homes: (Tower | Post)[] = u.type === 'archer' ? [...this.towers.values()] : [...this.posts.values()];
+        for (const h of homes) {
+          if (this.freeSlot(h) >= 0 && Math.hypot(h.pos.x - this.heroPos.x, h.pos.z - this.heroPos.z) < 5.5) {
+            this.assign(u, h);
+            break;
+          }
         }
-        w.alive = true;
-        w.hp = w.maxHp;
-        w.rig.root.visible = true;
-        w.rig.root.scale.set(1, 0.01, 1);
-        p.level = 0; // walls can be rebuilt after being destroyed
-        this.fx.burst(v2.set(spec.x, 0.5, spec.z), COLORS.wood, 16, 4);
-        break;
       }
-      case 'squire':
-        this.addSquire();
-        this.fx.text(v2.copy(this.heroPos).setY(2.6), 'Squire joined!', 'good');
-        break;
-      case 'forge':
-        this.forge = Math.min(FORGE_LEVELS.length - 1, this.forge + 1);
-        this.fx.text(v2.copy(this.heroPos).setY(2.6), `Damage ${FORGE_LEVELS[this.forge].damage}!`, 'good');
-        break;
-      case 'expand':
-        this.zone = Math.min(ZONE_RADII.length - 1, this.zone + 1);
-        this.world.setLevel(this.zone);
-        this.hud.banner('Land claimed!', false);
-        break;
-      case 'mine': {
-        let mine = this.mines.get(def.id);
-        if (!mine) {
-          const rig = M.makeMine();
-          rig.root.position.set(def.x, 0, def.z);
-          rig.root.rotation.y = Math.atan2(-def.x, -def.z);
-          this.root.add(rig.root);
-          const pileMesh = new THREE.InstancedMesh(M.GEO.coin, M.MAT.coin, MINE.pileMax);
-          pileMesh.count = 0;
-          pileMesh.castShadow = true;
-          pileMesh.frustumCulled = false;
-          this.root.add(pileMesh);
-          // Pile sits in front of the mine, toward the keep.
-          const inward = v2.set(-def.x, 0, -def.z).normalize();
-          const pilePos = new THREE.Vector3(def.x + inward.x * 2.2, 0, def.z + inward.z * 2.2);
-          pileMesh.position.copy(pilePos);
-          mine = { rig, pos: new THREE.Vector3(def.x, 0, def.z), level: 0, timer: 0, pile: 0, pileMesh, pilePos, collectT: 0 };
-          this.mines.set(def.id, mine);
-          // The plot moves aside so the mine stays visible.
-          p.setPos(def.x - inward.z * 2.4, def.z + inward.x * 2.4);
-          this.fx.text(v2.set(def.x, 3, def.z), 'Gold Mine!', 'good');
-        } else {
-          mine.level = Math.min(MINE.interval.length - 1, lvl);
-          this.fx.text(v2.set(def.x, 3, def.z), 'Mine upgraded!', 'good');
+    }
+
+    let fi = 0;
+    const fwdAngle = Math.atan2(this.moveDir.x, this.moveDir.z);
+    for (const u of this.units) {
+      const prevX = u.pos.x;
+      const prevZ = u.pos.z;
+      let walking = false;
+      if (u.state === 'follow') {
+        // Trailing formation behind the hero.
+        const row = Math.floor(fi / 3);
+        const colI = (fi % 3) - 1;
+        fi++;
+        const back = 1.7 + row * 1.0;
+        const ca = Math.cos(fwdAngle);
+        const sa = Math.sin(fwdAngle);
+        v1.set(this.heroPos.x - Math.sin(fwdAngle) * back + ca * colI * 0.95, 0, this.heroPos.z - Math.cos(fwdAngle) * back - sa * colI * 0.95);
+        walking = this.walkTo(u, v1, dt, 8);
+        u.rig.root.visible = this.heroAlive;
+      } else if (u.state === 'walk') {
+        this.approachPos(u, v1);
+        const arrived = !this.walkTo(u, v1, dt, 6) || u.pos.distanceTo(v1) < 0.3;
+        walking = !arrived;
+        if (arrived) {
+          u.state = 'station';
+          this.stationPos(u, u.pos);
+          this.sfx.pay(1);
         }
-        break;
+      } else {
+        this.stationPos(u, u.pos);
       }
+      if (u.state !== 'station') this.pushOutOfBuildings(u.pos, 0.3);
+
+      // Combat
+      u.cd -= dt;
+      u.swing = Math.max(0, u.swing - dt * 5);
+      let face = walking ? Math.atan2(u.pos.x - prevX, u.pos.z - prevZ) : u.facing;
+      if (u.type === 'archer') {
+        const range = ARCHER.range + (u.home && 'rig' in u.home ? TOWER_LEVELS[u.home.level].rangeBonus : -2);
+        const t = this.nearestEnemy(u.pos.x, u.pos.z, range);
+        if (t) {
+          face = Math.atan2(t.x - u.pos.x, t.z - u.pos.z);
+          if (u.cd <= 0 && u.state !== 'walk') {
+            u.cd = ARCHER.delay;
+            u.rig.muzzle.getWorldPosition(v2);
+            this.fire(v2, t, BOW_TIERS[u.tier].damage);
+            this.sfx.turret();
+          }
+        }
+      } else {
+        const t = this.nearestEnemy(u.pos.x, u.pos.z, KNIGHT.reach + 0.3);
+        if (t) {
+          face = Math.atan2(t.x - u.pos.x, t.z - u.pos.z);
+          if (u.cd <= 0) {
+            u.cd = KNIGHT.delay;
+            u.swing = 1;
+            this.hitEnemy(t, SWORD_TIERS[u.tier].damage);
+          }
+        } else if (u.state === 'station' && u.home && !('rig' in u.home)) {
+          // Face up the road toward the incoming horde.
+          this.roads[u.home.road].tangent(u.roadS, v2);
+          face = Math.atan2(-v2.x, -v2.z);
+        }
+        if (this.time - u.lastHit > 3) u.hp = Math.min(this.maxHp(u), u.hp + KNIGHT.regen * dt);
+      }
+      u.facing = lerpAngle(u.facing, face, Math.min(1, dt * 10));
+
+      u.rig.root.position.copy(u.pos);
+      u.rig.root.rotation.y = u.facing;
+      u.rig.body.position.y = walking ? Math.abs(Math.sin(this.time * 14 + fi)) * 0.12 : 0;
+      if (u.type === 'knight') u.rig.weapon.rotation.x = 0.9 - u.swing * 1.8;
+    }
+
+    // Remove the fallen.
+    this.units = this.units.filter((u) => {
+      if (u.hp > 0) return true;
+      if (u.home) u.home.units[u.slot] = null;
+      this.root.remove(u.rig.root);
+      u.rig.weaponMat.dispose();
+      return false;
+    });
+  }
+
+  /** Steps toward a point; returns whether it's still moving. */
+  private walkTo(u: Unit, target: THREE.Vector3, dt: number, speed: number) {
+    const dx = target.x - u.pos.x;
+    const dz = target.z - u.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.08) return false;
+    const step = Math.min(d, speed * dt * Math.min(1, d / 0.6 + 0.3));
+    u.pos.x += (dx / d) * step;
+    u.pos.z += (dz / d) * step;
+    u.pos.y = 0;
+    return true;
+  }
+
+  private damageKnight(u: Unit, dmg: number) {
+    u.hp -= dmg;
+    u.lastHit = this.time;
+    if (u.hp <= 0) {
+      this.fx.burst(v1.copy(u.pos).setY(0.8), COLORS.team, 14, 4);
+      this.fx.text(v1.copy(u.pos).setY(2), 'Knight fell!', 'hurt');
     }
   }
 
@@ -886,102 +1384,156 @@ export class Run {
     for (const t of this.towers.values()) {
       t.grow = Math.min(1, t.grow + dt * 3);
       const g = t.grow;
-      const s = g < 1 ? 1 + Math.sin(g * Math.PI) * 0.2 : 1;
-      t.rig.root.scale.set(s, Math.max(0.01, g) * s, s);
-      const stats = TOWER_LEVELS[t.level];
-      t.cd -= dt;
-      const target = this.nearestEnemy(t.pos, stats.range);
-      if (!target) continue;
-      const want = Math.atan2(target.pos.x - t.pos.x, target.pos.z - t.pos.z) - t.rig.root.rotation.y;
-      t.rig.head.rotation.y = lerpAngle(t.rig.head.rotation.y, want, Math.min(1, dt * 12));
-      if (t.cd <= 0) {
-        t.cd = stats.delay;
-        t.rig.muzzle.getWorldPosition(v1);
-        this.fire(v1, target, stats.damage);
-        if (stats.shots > 1) {
-          const second = this.nearestEnemy(t.pos, stats.range, target) ?? target;
-          this.fire(v1, second, stats.damage);
+      const s = g < 1 ? 1 + Math.sin(g * Math.PI) * 0.15 : 1;
+      t.rig.root.scale.set(s, Math.max(0.02, Math.min(1, g * 1.2)) * s, s);
+
+      const manned = t.units.filter((u) => u && u.state === 'station').length;
+      const slots = TOWER_LEVELS[t.level].slots;
+      this.hud.placeLabel(t.label, v1.copy(t.pos).setY(4.6), `${t.units.filter(Boolean).length}/${slots}`, manned === 0);
+
+      if (TOWER_LEVELS[t.level].ballista) {
+        t.ballistaCd -= dt;
+        const target = this.nearestEnemy(t.pos.x, t.pos.z, BALLISTA.range);
+        if (target) {
+          const want = Math.atan2(target.x - t.pos.x, target.z - t.pos.z) - t.rig.root.rotation.y;
+          t.rig.ballista.rotation.y = lerpAngle(t.rig.ballista.rotation.y, want, Math.min(1, dt * 8));
+          if (t.ballistaCd <= 0) {
+            t.ballistaCd = BALLISTA.delay;
+            t.rig.ballista.getWorldPosition(v1);
+            v1.y += 0.5;
+            this.fireBolt(v1, v2.set(target.x, 0.9, target.z));
+            this.sfx.boom();
+          }
         }
-        this.sfx.turret();
       }
     }
   }
 
-  private damageWall(w: Wall, dmg: number) {
-    w.hp -= dmg;
-    w.lastHit = this.time;
-    w.shake = 1;
-    if (w.hp <= 0) {
-      w.alive = false;
-      w.rig.root.visible = false;
-      this.fx.burst(v1.set(w.spec.x, 0.6, w.spec.z), COLORS.wood, 22, 5);
+  private updatePosts() {
+    for (const p of this.posts.values()) {
+      const slots = POST_LEVELS[p.level].slots;
+      const n = p.units.filter(Boolean).length;
+      this.hud.placeLabel(p.label, v1.copy(p.flag.position).setY(3.9), `${n}/${slots}`, n === 0);
+      p.flag.rotation.y = Math.sin(this.time * 2 + p.s) * 0.15;
+    }
+  }
+
+  private damageBarricade(b: Barricade, dmg: number) {
+    b.hp -= dmg;
+    b.lastHit = this.time;
+    b.shake = 1;
+    if (b.hp <= 0) {
+      b.alive = false;
+      b.mesh.visible = false;
+      this.fx.burst(v1.copy(b.pos).setY(0.6), COLORS.wood, 22, 5);
       this.sfx.pop();
     }
   }
 
-  private updateWalls(dt: number) {
-    for (const w of this.walls) {
-      if (!w.alive) continue;
-      // Rise out of the ground after building.
-      if (w.rig.root.scale.y < 1) w.rig.root.scale.y = Math.min(1, w.rig.root.scale.y + dt * 4);
-      w.shake = Math.max(0, w.shake - dt * 5);
-      w.rig.root.position.x = w.spec.x + (Math.random() - 0.5) * w.shake * 0.12;
-      // Slow self-repair when left alone.
-      if (this.time - w.lastHit > 5) w.hp = Math.min(w.maxHp, w.hp + w.maxHp * 0.05 * dt);
+  private updateBarricades(dt: number) {
+    for (const b of this.barricades.values()) {
+      if (!b.alive) continue;
+      b.rise = Math.min(1, b.rise + dt * 4);
+      b.shake = Math.max(0, b.shake - dt * 5);
+      b.mesh.scale.y = Math.max(0.02, b.rise);
+      b.mesh.position.x = b.pos.x + (Math.random() - 0.5) * b.shake * 0.12;
+      if (this.time - b.lastHit > 5) b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.04 * dt);
     }
   }
 
-  private updateMines(dt: number) {
-    const m = new THREE.Matrix4();
-    for (const mine of this.mines.values()) {
-      mine.timer += dt;
-      const interval = MINE.interval[mine.level];
-      if (mine.timer >= interval) {
-        mine.timer -= interval;
-        if (mine.pile < MINE.pileMax) mine.pile++;
-      }
-      mine.rig.pick.rotation.x = Math.sin(this.time * 6) * 0.6;
-      mine.rig.cart.position.x = Math.sin(this.time * 0.8) * 0.3;
+  // ------------------------------------------------------------------ workshops & weapons
 
-      // Hero collects the pile by walking up to it.
-      if (this.heroAlive && mine.pile > 0 && this.heroPos.distanceTo(mine.pilePos) < 2.2) {
-        mine.collectT += dt * 25;
-        while (mine.collectT >= 1 && mine.pile > 0) {
-          mine.collectT -= 1;
-          mine.pile--;
-          const from = mine.pilePos.clone().setY(0.1 + mine.pile * 0.05);
-          this.fx.fly(from, () => this.stackTop(v2), 0.25, 1, () => {
-            this.carry++;
-            this.pickupCombo++;
-            this.pickupComboT = 0.6;
-            this.sfx.pickup(this.pickupCombo);
-            this.hud.bumpGold();
+  private updateShops(dt: number) {
+    for (const s of this.shops.values()) {
+      if (s.rig.anim) s.rig.anim.rotation.z = Math.sin(this.time * 9) * 0.7;
+      if (s.kind !== 'forge' && s.kind !== 'bowyer') continue;
+      if (s.rig.chimney) {
+        s.smokeT -= dt;
+        if (s.smokeT <= 0) {
+          s.smokeT = 0.35;
+          this.fx.smoke(v1.copy(s.rig.chimney).add(s.pos));
+        }
+      }
+      if (s.rack.length < WORKSHOP.rackMax) {
+        s.timer += dt;
+        const interval = WORKSHOP.interval[s.level - 1];
+        if (s.timer >= interval) {
+          s.timer = 0;
+          s.rack.push(s.level);
+          this.fx.burst(v1.copy(s.rackWorld).setY(1), s.kind === 'forge' ? COLORS.fire : COLORS.wood, 5, 2);
+        }
+      }
+      // Draw the rack.
+      const im = s.rackMesh!;
+      im.count = s.rack.length;
+      const tiers = s.kind === 'forge' ? SWORD_TIERS : BOW_TIERS;
+      s.rack.forEach((tier, i) => {
+        v1.copy(s.rig.rack).add(v2.set(-0.8 + i * 0.23, 0.45, -0.45));
+        quat.setFromEuler(eul.set(0.15, 0, 0, 'XYZ'));
+        mtx.compose(v1, quat, scl.set(1, 1, 1));
+        im.setMatrixAt(i, mtx);
+        im.setColorAt(i, col.set(tiers[tier].color));
+      });
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+
+      // Pick up when standing by the rack.
+      if (this.heroAlive && s.rack.length && this.weapons.length < PLAYER.maxWeapons && this.heroPos.distanceTo(s.rackWorld) < 2.4) {
+        s.pickT -= dt;
+        if (s.pickT <= 0) {
+          s.pickT = 0.12;
+          const tier = s.rack.pop()!;
+          const kind: WeaponKind = s.kind === 'forge' ? 'sword' : 'bow';
+          const from = v1.copy(s.rackWorld).setY(0.9).clone();
+          this.fx.fly(from, () => this.frontTop(v3), 0.25, 0.8, () => {
+            this.weapons.push({ kind, tier });
+            this.weapons.sort((a, b) => (a.kind === b.kind ? a.tier - b.tier : a.kind < b.kind ? -1 : 1));
+            this.sfx.pickup(4);
           });
         }
-      } else mine.collectT = 0;
-
-      // Draw the pile as small coin columns.
-      mine.pileMesh.count = mine.pile;
-      for (let i = 0; i < mine.pile; i++) {
-        const col = i % 3;
-        const row = Math.floor(i / 3);
-        v1.set((col - 1) * 0.5, 0.06 + row * 0.1, (col % 2) * 0.3);
-        m.makeTranslation(v1.x, v1.y, v1.z);
-        mine.pileMesh.setMatrixAt(i, m);
-      }
-      mine.pileMesh.instanceMatrix.needsUpdate = true;
+      } else s.pickT = 0;
     }
   }
 
-  // ------------------------------------------------------------------ keep
+  /** Hand carried weapons to nearby defenders who have something worse. */
+  private updateWeapons(dt: number) {
+    this.giveT -= dt;
+    if (!this.heroAlive || !this.weapons.length || this.giveT > 0) return;
+    for (let wi = this.weapons.length - 1; wi >= 0; wi--) {
+      const w = this.weapons[wi];
+      const type: UnitType = w.kind === 'sword' ? 'knight' : 'archer';
+      let best: Unit | null = null;
+      for (const u of this.units) {
+        if (u.type !== type || u.tier >= w.tier) continue;
+        if (Math.hypot(u.pos.x - this.heroPos.x, u.pos.z - this.heroPos.z) > 5) continue;
+        if (!best || u.tier < best.tier) best = u;
+      }
+      if (!best) continue;
+      this.weapons.splice(wi, 1);
+      this.giveT = 0.18;
+      const unit = best;
+      const from = this.frontTop(new THREE.Vector3());
+      this.fx.fly(from, () => v3.copy(unit.pos).setY(unit.pos.y + 1), 0.3, 1, () => {
+        if (!this.units.includes(unit)) return;
+        this.setTier(unit, Math.max(unit.tier, w.tier));
+        const tiers = unit.type === 'archer' ? BOW_TIERS : SWORD_TIERS;
+        this.fx.text(v1.copy(unit.pos).setY(unit.pos.y + 2.2), tiers[w.tier].name + '!', 'good');
+        this.fx.burst(v1.copy(unit.pos).setY(unit.pos.y + 1), tiers[w.tier].color, 10, 3);
+        this.sfx.build();
+      });
+      return;
+    }
+  }
 
-  private damageKeep(dmg: number) {
-    this.keepHp -= dmg;
-    this.keepLastHit = this.time;
-    this.fx.burst(v1.set((Math.random() - 0.5) * 2, 1.5, (Math.random() - 0.5) * 2), COLORS.stone, 4, 3);
+  // ------------------------------------------------------------------ hall
+
+  private damageHall(dmg: number) {
+    this.hallHp -= dmg;
+    this.hallLastHit = this.time;
+    this.fx.burst(v1.set((Math.random() - 0.5) * 3, 2, (Math.random() - 0.5) * 3), COLORS.wood, 4, 3);
     this.fx.shake = Math.max(this.fx.shake, 0.15);
-    if (this.keepHp <= 0 && !this.over) {
-      this.keepHp = 0;
+    if (this.hallHp <= 0 && !this.over) {
+      this.hallHp = 0;
       this.over = true;
       this.sfx.boom();
       this.fx.burst(v1.set(0, 2, 0), COLORS.fire, 60, 9, 2);
@@ -991,49 +1543,104 @@ export class Run {
     }
   }
 
-  private updateKeep(dt: number) {
-    if (this.time - this.keepLastHit > 5) this.keepHp = Math.min(KEEP.maxHp, this.keepHp + KEEP.regen * dt);
-    this.keep.flag.rotation.y = Math.sin(this.time * 2.2) * 0.25;
-    this.hud.setKeep(this.keepHp / KEEP.maxHp);
+  private updateHall(dt: number) {
+    if (this.time - this.hallLastHit > 5) this.hallHp = Math.min(HALL.maxHp, this.hallHp + HALL.regen * dt);
+    this.hall.banners.children.forEach((b, i) => (b.rotation.y = Math.sin(this.time * 2 + i) * 0.2));
+    this.hud.setKeep(this.hallHp / HALL.maxHp);
   }
 
-  // ------------------------------------------------------------------ guide line
+  // ------------------------------------------------------------------ guidance
 
-  /** Dotted trail to the nearest plot you can afford — the "go here next" nudge. */
-  private updateGuide() {
-    let best: Plot | null = null;
-    let bd = Infinity;
-    if (this.heroAlive && this.carry > 0) {
-      for (const p of this.plots) {
-        if (!p.shown || p.remaining > this.carry) continue;
-        const d = p.pos.distanceToSquared(this.heroPos);
+  /** The single most useful next destination, if any. */
+  private guideTarget(): THREE.Vector3 | null {
+    const hx = this.heroPos.x;
+    const hz = this.heroPos.z;
+    const nearest = (pts: THREE.Vector3[]) => {
+      let best: THREE.Vector3 | null = null;
+      let bd = Infinity;
+      for (const p of pts) {
+        const d = (p.x - hx) ** 2 + (p.z - hz) ** 2;
         if (d < bd) {
           bd = d;
           best = p;
         }
       }
+      return best;
+    };
+    // 1. Followers waiting for a home.
+    const types = new Set(this.units.filter((u) => u.state === 'follow').map((u) => u.type));
+    const homes: THREE.Vector3[] = [];
+    if (types.has('archer')) for (const t of this.towers.values()) if (this.freeSlot(t) >= 0) homes.push(t.pos);
+    if (types.has('knight')) for (const p of this.posts.values()) if (this.freeSlot(p) >= 0) homes.push(p.pos);
+    if (homes.length) return nearest(homes);
+    // 2. Carried weapons someone needs.
+    const needs: THREE.Vector3[] = [];
+    for (const w of this.weapons) {
+      const type = w.kind === 'sword' ? 'knight' : 'archer';
+      for (const u of this.units) if (u.type === type && u.tier < w.tier) needs.push(u.pos);
     }
-    const show = best && bd > 2.5 * 2.5;
+    if (needs.length) return nearest(needs);
+    // 3. A rack with upgrades waiting.
+    if (this.weapons.length < PLAYER.maxWeapons) {
+      const racks: THREE.Vector3[] = [];
+      for (const s of this.shops.values()) {
+        if (!s.rack.length) continue;
+        const type = s.kind === 'forge' ? 'knight' : 'archer';
+        const top = Math.max(...s.rack);
+        if (this.units.some((u) => u.type === type && u.tier < top)) racks.push(s.rackWorld);
+      }
+      if (racks.length) return nearest(racks);
+    }
+    // 4. The cheapest-to-reach plot we can afford.
+    if (this.carry > 0) {
+      const ok = this.plots.filter((p) => p.shown && p.remaining <= this.carry).map((p) => p.pos);
+      if (ok.length) return nearest(ok);
+    }
+    return null;
+  }
+
+  private updateGuide() {
+    const target = this.heroAlive ? this.guideTarget() : null;
+    const d = target ? Math.hypot(target.x - this.heroPos.x, target.z - this.heroPos.z) : 0;
+    const show = target && d > 3;
     const n = this.guide.length;
     for (let i = 0; i < n; i++) {
       const dot = this.guide[i];
-      if (!show) {
-        dot.visible = false;
-        continue;
-      }
       const t = (i + ((this.time * 2) % 1)) / n;
-      const len = Math.sqrt(bd) - 1.2;
-      if (t * Math.sqrt(bd) > len) {
+      if (!show || t * d > d - 1.4) {
         dot.visible = false;
         continue;
       }
       dot.visible = true;
-      dot.position.set(
-        this.heroPos.x + (best!.pos.x - this.heroPos.x) * t,
-        0.05,
-        this.heroPos.z + (best!.pos.z - this.heroPos.z) * t,
-      );
+      dot.position.set(this.heroPos.x + (target!.x - this.heroPos.x) * t, 0.06, this.heroPos.z + (target!.z - this.heroPos.z) * t);
     }
+  }
+
+  private currentHint() {
+    if (!this.heroAlive) return `Back in ${Math.ceil(this.respawnT)}…`;
+    const built = (id: string) => this.isBuilt(id);
+    if (!built('tw1')) return this.carry < 5 ? 'Defeat goblins and grab their gold' : 'Stand on the plot to build a watchtower';
+    const followers = this.units.filter((u) => u.state === 'follow');
+    if (followers.some((u) => u.type === 'archer') && [...this.towers.values()].some((t) => this.freeSlot(t) >= 0))
+      return 'Lead your archer to an empty watchtower';
+    if (followers.some((u) => u.type === 'knight') && [...this.posts.values()].some((p) => this.freeSlot(p) >= 0))
+      return 'Lead your knight to the guard post';
+    if (followers.length) return 'Build another tower or post for your recruits';
+    if (built('tw2') && !built('range')) return 'Towers need archers. Build an Archery Range';
+    if (built('range') && this.units.filter((u) => u.type === 'archer').length < 2) return 'Recruit an archer at the range';
+    if (built('gp1') && !built('barracks')) return 'Build Barracks to recruit knights';
+    if (built('barracks') && !this.units.some((u) => u.type === 'knight')) return 'Recruit knights to hold the road';
+    if (this.weapons.length) {
+      const k = this.weapons[this.weapons.length - 1].kind;
+      return k === 'sword' ? 'Walk up to your knights to hand over swords' : 'Walk up to your archers to hand over bows';
+    }
+    for (const s of this.shops.values()) {
+      if (!s.rack.length) continue;
+      const type = s.kind === 'forge' ? 'knight' : 'archer';
+      if (this.units.some((u) => u.type === type && u.tier < Math.max(...s.rack)))
+        return s.kind === 'forge' ? 'Swords are ready at the Forge' : 'Bows are ready at the Bowyer';
+    }
+    return '';
   }
 
   // ------------------------------------------------------------------ teardown
@@ -1042,14 +1649,32 @@ export class Run {
     this.scene.remove(this.root);
     for (const p of this.plots) p.dispose();
     for (const e of this.enemies) if (e.bar) this.hud.removeBar(e.bar);
+    for (const u of this.units) u.rig.weaponMat.dispose();
     this.hud.removeBar(this.heroBar);
-    const mats = new Set<THREE.Material>();
-    for (const e of this.enemies) e.rig.mats.forEach((m) => mats.add(m));
-    for (const pool of Object.values(this.enemyPool)) for (const r of pool) r.mats.forEach((m) => mats.add(m));
-    mats.forEach((m) => m.dispose());
-    M.MAT.tabard.emissive.setRGB(0, 0, 0);
+    for (const im of Object.values(this.crowd)) im.geometry.dispose();
+    M.MAT.team.emissive.setRGB(0, 0, 0);
   }
 }
+
+const SHOP_MAKERS: Record<Workshop['kind'], () => M.WorkshopRig> = {
+  range: M.makeRange,
+  barracks: M.makeBarracks,
+  forge: M.makeForge,
+  bowyer: M.makeBowyer,
+};
+
+const SHOP_NAMES: Record<Workshop['kind'], string> = {
+  range: 'Archery Range!',
+  barracks: 'Barracks!',
+  forge: 'Forge! Making Iron Swords',
+  bowyer: 'Bowyer! Making Longbows',
+};
+
+/** After the first build, upgrade pads for workshops move beside the building. */
+const SHOP_PAD_AFTER: Record<string, { x: number; z: number }> = {
+  forge: { x: -13.4, z: -3.4 },
+  bowyer: { x: 1.9, z: 12.6 },
+};
 
 function lerpAngle(a: number, b: number, t: number) {
   let d = b - a;

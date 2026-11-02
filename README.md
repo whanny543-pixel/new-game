@@ -1,8 +1,17 @@
 # Hearthguard
 
-A portrait, one-thumb medieval defense game for iOS and Android.
+A portrait, one-thumb medieval road-defense game for iOS and Android.
 
-Gold drops from the goblins your knight shoots, and it stacks up on the knight's back. Stand on a build plot to spend it on archer towers, palisades, squires, forge upgrades, gold mines and more land. Hold the keep for as many waves as you can, with a troll boss every third wave.
+Goblin hordes march down winding desert roads toward your town hall. Your hero shoots on their own, and gold from fallen goblins stacks up on their back. Spend it by standing on build plots.
+
+**The defense loop**
+- **Watchtowers** sit beside the road. They're empty when built: recruit archers at the **Archery Range** and lead them to a free tower. Upgrades add a second archer slot, then a ballista.
+- **Guard posts** hold the road itself. Recruit knights at the **Barracks** and lead them to a post, where they block and fight the horde.
+- **Barricades** stall the horde until they're smashed (rebuild them for gold).
+- The **Forge** makes swords and the **Bowyer** makes bows. Both stack up on a rack. Pick them up and walk past your knights and archers to hand them over. Upgrading a workshop makes better weapons: Iron → Steel → Gold.
+- A second road opens at wave 7, and a troll boss arrives every 4th wave.
+
+A dotted trail always points to the most useful next step, and a hint line at the bottom explains it.
 
 Built with Three.js and TypeScript (Vite), and packaged for the app stores with Capacitor. All models and sounds are generated in code, so there are no asset files to license.
 
@@ -32,10 +41,11 @@ Before submitting to the stores:
 
 | File | What it does |
 | --- | --- |
-| `src/config.ts` | All balancing: costs, damage, wave sizes, plot layout |
-| `src/run.ts` | Gameplay: hero, enemies, waves, building, economy |
-| `src/models.ts` | Procedural low-poly models |
-| `src/world.ts` | Terrain, territory growth, decoration, lighting |
+| `src/config.ts` | All balancing: costs, damage, weapon tiers, waves, roads, plot layout |
+| `src/run.ts` | Gameplay: hero, horde, defenders, workshops, waves, economy, hints |
+| `src/road.ts` | Road curves the horde walks along |
+| `src/models.ts` | Procedural low-poly models (instanced horde, merged buildings) |
+| `src/world.ts` | Desert terrain, roads, scenery, lighting |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
 | `src/hud.ts`, `src/style.css` | HUD, menus, health bars |
 | `src/input.ts` | Floating joystick and keyboard |

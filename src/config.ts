@@ -1,193 +1,190 @@
 // All gameplay tuning lives here so balancing never requires touching game logic.
 
 export const COLORS = {
-  sky: 0x8fc7e8,
-  fog: 0x9fcbe0,
-  ground: 0xc9a46b,
-  groundDark: 0xa98450,
-  colony: 0x6cbf4a,
-  colonyLine: 0x7fd25a,
-  colonyEdge: 0xe8f7c0,
+  sky: 0xf2c38b,
+  fog: 0xe9b57a,
+  sand: 0xdcaa6a,
+  sandDark: 0xc48f52,
+  sandLight: 0xe8bf86,
+  road: 0x8f5532,
+  roadEdge: 0xa86c40,
+  cliff: 0xd58a56,
+  cliffDark: 0xb46a3d,
+  cliffLight: 0xe7a46d,
   coin: 0xffc928,
   coinDeep: 0xb07a00,
-  steel: 0xc9d1dc,
+  steel: 0xcfd6e0,
   steelDark: 0x6f7886,
-  tabard: 0x2f6fd6,
+  team: 0x2f6fd6,
+  teamDark: 0x1f4d9a,
   plume: 0xe2343b,
-  wood: 0x8a5a33,
-  woodDark: 0x5e3b20,
+  wood: 0x9b6638,
+  woodDark: 0x6a4122,
+  woodLight: 0xc08850,
+  roof: 0x7d4d2b,
   stone: 0xb9b2a6,
   stoneDark: 0x8d867b,
-  roof: 0xc4452d,
-  rock: 0x9a9184,
-  rockDark: 0x7b7367,
-  pine: 0x2f7d4a,
-  pineDark: 0x245f39,
   skin: 0xf2c9a0,
-  goblin: 0x6fbf3a,
-  runner: 0xd94f2b,
-  troll: 0x6b7f8f,
+  cactus: 0x6aa84f,
+  bush: 0x9a8a4a,
+  goblin: 0x6cc13a,
+  goblinDark: 0x3f7f22,
+  rag: 0xb3402c,
+  runner: 0xe0482c,
+  troll: 0x7d8c99,
   arrow: 0xfff3c4,
-  squire: 0xf2a33a,
   fire: 0xff9a2e,
+  straw: 0xe8cc6a,
 } as const;
 
-/** Territory radius for each expansion level. */
-export const ZONE_RADII = [8, 13.5, 19, 25];
-export const WORLD_RADIUS = 40;
-export const SPAWN_RADIUS = 31;
-
 export const PLAYER = {
-  speed: 6.8,
-  maxHp: 120,
-  regen: 14, // hp/s while inside the colony
-  range: 7.5,
+  speed: 7,
+  maxHp: 150,
+  regen: 10,
+  range: 8,
   baseDamage: 20,
-  baseFireDelay: 0.34,
-  magnet: 3.4,
+  fireDelay: 0.3,
+  magnet: 3.6,
+  /** Seconds before an uncollected coin flies to the hero by itself. */
+  coinAutoCollect: 6,
   respawnTime: 3,
   maxVisibleStack: 50,
+  maxWeapons: 10,
 };
 
-/** Hero crossbow damage / fire delay per Forge upgrade level. */
-export const FORGE_LEVELS = [
-  { damage: 20, delay: 0.34 },
-  { damage: 30, delay: 0.3 },
-  { damage: 45, delay: 0.26 },
-  { damage: 65, delay: 0.22 },
-  { damage: 90, delay: 0.18 },
+export const HALL = { maxHp: 1200, regen: 3, radius: 3.4 };
+
+/** Weapon tiers: 0 is what a fresh recruit carries; forge/bowyer levels make 1..3. */
+export const SWORD_TIERS = [
+  { name: 'Club', damage: 9, color: 0x6a4122 },
+  { name: 'Iron Sword', damage: 17, color: 0xcfd6e0 },
+  { name: 'Steel Sword', damage: 28, color: 0x8fd3ff },
+  { name: 'Gold Sword', damage: 44, color: 0xffc928 },
+];
+export const BOW_TIERS = [
+  { name: 'Shortbow', damage: 14, color: 0x8a5a33 },
+  { name: 'Longbow', damage: 23, color: 0x5e3b20 },
+  { name: 'Recurve Bow', damage: 35, color: 0x2f6fd6 },
+  { name: 'Gold Bow', damage: 52, color: 0xffc928 },
 ];
 
-/** Squires follow the hero and fire their own crossbows. */
-export const SQUIRE = { range: 7, damage: 10, delay: 0.55 };
+export const ARCHER = { range: 9.5, delay: 0.6 };
+export const KNIGHT = { maxHp: 110, hpPerTier: 35, delay: 0.75, reach: 1.7, regen: 6 };
 
+/** Watchtower per level: archer slots, and whether a ballista is mounted. */
 export const TOWER_LEVELS = [
-  { damage: 20, delay: 0.6, range: 9, shots: 1 },
-  { damage: 35, delay: 0.45, range: 10, shots: 1 },
-  { damage: 55, delay: 0.38, range: 11, shots: 2 },
+  { slots: 1, rangeBonus: 0, ballista: false },
+  { slots: 2, rangeBonus: 1.5, ballista: false },
+  { slots: 2, rangeBonus: 2.5, ballista: true },
 ];
+export const BALLISTA = { damage: 60, delay: 1.6, range: 13, pierce: 4 };
+export const POST_LEVELS = [{ slots: 2 }, { slots: 4 }];
+export const BARRICADE_HP = [220, 380];
 
-/** The keep at the centre — lose it and the run ends. */
-export const KEEP = { maxHp: 700, regen: 4, radius: 2.0 };
+/** Forge / bowyer: seconds per weapon at each level, and rack capacity. */
+export const WORKSHOP = { interval: [6, 4.2, 3], rackMax: 8 };
+
+export type EnemyKind = 'goblin' | 'runner' | 'troll';
 
 export interface EnemyType {
   hp: number;
   speed: number;
   damage: number;
   radius: number;
-  reward: number;
-  color: number;
+  coin: number; // expected coins dropped
   boss?: boolean;
 }
 
-export type EnemyKind = 'goblin' | 'runner' | 'troll';
-
 export const ENEMIES: Record<EnemyKind, EnemyType> = {
-  goblin: { hp: 32, speed: 2.3, damage: 9, radius: 0.45, reward: 1, color: COLORS.goblin },
-  runner: { hp: 20, speed: 4.0, damage: 6, radius: 0.36, reward: 1, color: COLORS.runner },
-  troll: { hp: 420, speed: 1.35, damage: 32, radius: 1.05, reward: 18, color: COLORS.troll, boss: true },
+  goblin: { hp: 26, speed: 2.5, damage: 7, radius: 0.42, coin: 1 },
+  runner: { hp: 16, speed: 4.2, damage: 5, radius: 0.36, coin: 1 },
+  troll: { hp: 520, speed: 1.3, damage: 34, radius: 1.05, coin: 20, boss: true },
 };
-
-export type PadKind = 'tower' | 'wall' | 'squire' | 'forge' | 'expand' | 'mine';
-
-export interface WallSpec {
-  x: number;
-  z: number;
-  rot: number;
-  len: number;
-}
-
-export interface PadDef {
-  id: string;
-  kind: PadKind;
-  x: number;
-  z: number;
-  /** Cost of each successive level. */
-  costs: number[];
-  /** Territory level required before the pad appears. */
-  zone: number;
-  wall?: WallSpec;
-}
-
-// Angles are measured clockwise from "north" (-z), which is the top of the screen.
-const polar = (deg: number, r: number) => {
-  const a = (deg * Math.PI) / 180;
-  return { x: Math.sin(a) * r, z: -Math.cos(a) * r };
-};
-
-const tower = (id: string, deg: number, r: number, zone: number, costs: number[]): PadDef => ({
-  id,
-  kind: 'tower',
-  ...polar(deg, r),
-  costs,
-  zone,
-});
-
-/** A palisade segment tangent to the territory edge, with its build pad just inside. */
-const wall = (id: string, deg: number, zone: number, stepDeg: number, cost: number): PadDef => {
-  const R = ZONE_RADII[zone] + 0.4;
-  const pad = polar(deg, R - 1.6);
-  const c = polar(deg, R);
-  const len = 2 * R * Math.sin(((stepDeg / 2) * Math.PI) / 180) + 0.5;
-  return {
-    id,
-    kind: 'wall',
-    ...pad,
-    costs: [cost],
-    zone,
-    wall: { x: c.x, z: c.z, rot: (-deg * Math.PI) / 180, len },
-  };
-};
-
-const walls = (prefix: string, zone: number, from: number, to: number, step: number, cost: number) => {
-  const out: PadDef[] = [];
-  for (let d = from; d <= to + 0.001; d += step) out.push(wall(`${prefix}${d}`, d, zone, step, cost));
-  return out;
-};
-
-export const PADS: PadDef[] = [
-  // --- Territory level 0 ---
-  tower('t0', -38, 5, 0, [8, 40, 110]),
-  { id: 'squire', kind: 'squire', x: -3.4, z: 2.6, costs: [15, 45, 100, 200], zone: 0 },
-  { id: 'forge', kind: 'forge', x: 3.4, z: 2.6, costs: [20, 60, 140, 280], zone: 0 },
-  ...walls('w0_', 0, -50, 50, 50, 14),
-  { id: 'e1', kind: 'expand', x: 0, z: 5.6, costs: [40], zone: 0 },
-
-  // --- Territory level 1 ---
-  tower('t1a', -45, 10.5, 1, [30, 90, 200]),
-  tower('t1b', 45, 10.5, 1, [30, 90, 200]),
-  { id: 'm1', kind: 'mine', x: -8.2, z: 5, costs: [45, 120], zone: 1 },
-  ...walls('w1_', 1, -70, 70, 35, 28),
-  { id: 'e2', kind: 'expand', x: 0, z: 10.8, costs: [130], zone: 1 },
-
-  // --- Territory level 2 ---
-  tower('t2a', -12.5, 15.5, 2, [70, 180, 340]),
-  tower('t2b', 12.5, 15.5, 2, [70, 180, 340]),
-  tower('t2c', -62.5, 15.5, 2, [80, 200, 380]),
-  tower('t2d', 62.5, 15.5, 2, [80, 200, 380]),
-  { id: 'm2', kind: 'mine', x: 9, z: 9, costs: [100, 240], zone: 2 },
-  ...walls('w2_', 2, -100, 100, 25, 45),
-  { id: 'e3', kind: 'expand', x: 0, z: 16.2, costs: [320], zone: 2 },
-
-  // --- Territory level 3 ---
-  tower('t3a', -30, 21.5, 3, [150, 340, 600]),
-  tower('t3b', 30, 21.5, 3, [150, 340, 600]),
-  tower('t3c', -90, 21.5, 3, [160, 360, 620]),
-  tower('t3d', 90, 21.5, 3, [160, 360, 620]),
-  tower('t3e', -150, 21.5, 3, [170, 380, 650]),
-  tower('t3f', 150, 21.5, 3, [170, 380, 650]),
-  ...walls('w3_', 3, -160, 180, 20, 70),
-];
 
 export const WAVES = {
-  firstDelay: 4,
-  breakTime: 5,
-  baseCount: 7,
-  countPerWave: 4,
-  hpGrowth: 0.17,
-  /** Spawn arc half-width in degrees: enemies come from the north first, then from everywhere. */
-  arc: (wave: number) => Math.min(180, 30 + wave * 13),
+  firstDelay: 3,
+  duration: 26,
+  breakTime: 4,
+  baseCount: 14,
+  countPerWave: 7,
+  hpGrowth: 0.1,
+  roadBWave: 7,
 };
 
-export const MINE = { interval: [2.2, 1.2], pileMax: 30 };
-export const WALL_HP = [260, 420, 640, 900];
+// ------------------------------------------------------------------ map
+
+/** Control points of each road, from the wilds to the town hall (north is -z). */
+export const ROADS: [number, number][][] = [
+  [
+    [-5, -52],
+    [-13, -43],
+    [-14, -33],
+    [-4, -26],
+    [9, -21],
+    [12, -13],
+    [5, -7.5],
+    [3.6, -3.4],
+  ],
+  [
+    [44, -12],
+    [36, -18],
+    [26, -16],
+    [20, -6],
+    [13, 1],
+    [6, 2],
+    [3.9, 1.2],
+  ],
+];
+export const ROAD_HALF_WIDTH = 1.9;
+
+export type PlotKind =
+  | 'tower'
+  | 'post'
+  | 'barricade'
+  | 'range'
+  | 'barracks'
+  | 'forge'
+  | 'bowyer'
+  | 'recruitArcher'
+  | 'recruitKnight';
+
+/** Where a plot sits: fixed coordinates, or beside/on a road at a fraction of its length. */
+export type Place = { x: number; z: number } | { road: number; t: number; side: number; dist: number };
+
+export interface PlotDef {
+  id: string;
+  kind: PlotKind;
+  place: Place;
+  costs: number[];
+  /** Plot ids that must be built first; "wave:N" waits for wave N. */
+  requires: string[];
+}
+
+const recruitCosts = (start: number, step: number) => Array.from({ length: 60 }, (_, i) => start + i * step);
+
+export const PLOTS: PlotDef[] = [
+  { id: 'tw1', kind: 'tower', place: { road: 0, t: 0.86, side: 1, dist: 3.8 }, costs: [5, 35, 110], requires: [] },
+  { id: 'tw2', kind: 'tower', place: { road: 0, t: 0.66, side: -1, dist: 3.8 }, costs: [10, 40, 110], requires: ['tw1'] },
+  { id: 'range', kind: 'range', place: { x: -8, z: 3 }, costs: [18], requires: ['tw2'] },
+  { id: 'recA', kind: 'recruitArcher', place: { x: -8, z: 8.6 }, costs: recruitCosts(6, 2), requires: ['range'] },
+  { id: 'bar1', kind: 'barricade', place: { road: 0, t: 0.79, side: 0, dist: 0 }, costs: [10], requires: ['range'] },
+  { id: 'gp1', kind: 'post', place: { road: 0, t: 0.74, side: 0, dist: 0 }, costs: [15, 55], requires: ['range'] },
+  { id: 'barracks', kind: 'barracks', place: { x: 7.5, z: 7.5 }, costs: [25], requires: ['gp1'] },
+  { id: 'recK', kind: 'recruitKnight', place: { x: 11.6, z: 9.8 }, costs: recruitCosts(8, 3), requires: ['barracks'] },
+  { id: 'forge', kind: 'forge', place: { x: -9, z: -5 }, costs: [30, 100, 240], requires: ['barracks'] },
+  { id: 'tw3', kind: 'tower', place: { road: 0, t: 0.46, side: 1, dist: 3.8 }, costs: [25, 70, 160], requires: ['barracks'] },
+  { id: 'bowyer', kind: 'bowyer', place: { x: -2.5, z: 12 }, costs: [30, 100, 240], requires: ['forge'] },
+  { id: 'tw4', kind: 'tower', place: { road: 0, t: 0.32, side: -1, dist: 3.8 }, costs: [35, 85, 190], requires: ['bowyer'] },
+  { id: 'gp2', kind: 'post', place: { road: 0, t: 0.53, side: 0, dist: 0 }, costs: [30, 80], requires: ['tw3'] },
+  { id: 'bar2', kind: 'barricade', place: { road: 0, t: 0.58, side: 0, dist: 0 }, costs: [20], requires: ['gp2'] },
+  // The east road opens later in the run.
+  { id: 'tw5', kind: 'tower', place: { road: 1, t: 0.8, side: 1, dist: 3.8 }, costs: [30, 80, 180], requires: ['wave:7'] },
+  { id: 'tw6', kind: 'tower', place: { road: 1, t: 0.55, side: -1, dist: 3.8 }, costs: [40, 95, 200], requires: ['wave:7'] },
+  { id: 'gp3', kind: 'post', place: { road: 1, t: 0.68, side: 0, dist: 0 }, costs: [35, 90], requires: ['wave:7'] },
+  { id: 'bar3', kind: 'barricade', place: { road: 1, t: 0.74, side: 0, dist: 0 }, costs: [25], requires: ['wave:7'] },
+  { id: 'tw7', kind: 'tower', place: { road: 0, t: 0.18, side: 1, dist: 3.8 }, costs: [50, 110, 230], requires: ['tw4', 'wave:8'] },
+  { id: 'tw8', kind: 'tower', place: { road: 1, t: 0.32, side: 1, dist: 3.8 }, costs: [55, 120, 240], requires: ['tw6', 'wave:9'] },
+];
+
+/** On-road plots (posts, barricades) put their pad beside the road on this side. */
+export const ROADSIDE_PAD = { side: -1, dist: 3.6 };
