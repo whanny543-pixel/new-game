@@ -1,0 +1,29 @@
+{
+  "name": "outpost-rush",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "build:single": "tsc --noEmit && vite build --mode single",
+    "preview": "vite preview --host",
+    "cap:sync": "npm run build && cap sync",
+    "ios": "npm run cap:sync && cap open ios",
+    "android": "npm run cap:sync && cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "7.0.1",
+    "@capacitor/core": "7.0.1",
+    "@capacitor/haptics": "7.0.0",
+    "@capacitor/ios": "7.0.1",
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "7.0.1",
+    "@types/three": "0.170.0",
+    "typescript": "5.7.3",
+    "vite": "6.0.7",
+    "vite-plugin-singlefile": "2.1.0"
+  }
+}
