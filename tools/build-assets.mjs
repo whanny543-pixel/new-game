@@ -94,6 +94,19 @@ await character(
   ['Idle', 'Running_A', '1H_Melee_Attack_Chop', 'Cheer', 'Death_A'],
   ['1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Spike_Shield', '2H_Sword'],
 );
+// Kingdom folk: woodcutters/builders (barbarian with an axe) and townsfolk/miners (rogue, unarmed).
+await character(
+  `${ADV}/Characters/gltf/Barbarian.glb`,
+  'worker.glb',
+  ['Idle', 'Walking_A', '1H_Melee_Attack_Chop', 'Interact', 'Cheer', 'PickUp'],
+  ['1H_Axe_Offhand', 'Barbarian_Round_Shield', '2H_Axe', 'Mug', 'Barbarian_Cape'],
+);
+await character(
+  `${ADV}/Characters/gltf/Rogue.glb`,
+  'villager.glb',
+  ['Idle', 'Walking_A', 'Interact', 'PickUp', 'Cheer', 'Sit_Floor_Idle'],
+  ['Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable'],
+);
 const SKEL_ANIMS = ['Walking_A', 'Running_A', '1H_Melee_Attack_Chop', 'Death_A', 'Spawn_Ground', 'Idle_Combat'];
 await character(`${SKEL}/Characters/gltf/Skeleton_Minion.glb`, 'skel_minion.glb', SKEL_ANIMS);
 await character(`${SKEL}/Characters/gltf/Skeleton_Rogue.glb`, 'skel_rogue.glb', SKEL_ANIMS);
@@ -119,11 +132,17 @@ const PROPS = {
     'building_market_blue',
     'building_tavern_blue',
     'building_church_blue',
+    'building_mine_blue',
   ],
   [`${HEX}/buildings/neutral`]: [
     'fence_wood_straight',
+    'fence_wood_straight_gate',
     'fence_stone_straight',
+    'fence_stone_straight_gate',
     'wall_straight',
+    'wall_straight_gate',
+    'wall_corner_A_outside',
+    'building_grain',
     'building_scaffolding',
     'building_stage_A',
     'building_destroyed',
@@ -169,7 +188,7 @@ const PROPS = {
     'resource_stone',
     'flag_blue',
   ],
-  [`${ADV}/Assets/gltf`]: ['arrow', 'sword_1handed', 'crossbow_1handed', 'quiver', 'shield_round_color'],
+  [`${ADV}/Assets/gltf`]: ['arrow', 'sword_1handed', 'crossbow_1handed', 'quiver', 'shield_round_color', 'axe_1handed'],
   [`${SKEL}/Assets/gltf`]: ['Skeleton_Blade', 'Skeleton_Axe', 'Skeleton_Shield_Small_A', 'Skeleton_Shield_Large_A'],
   [DUN]: ['chest_gold', 'coin', 'coin_stack_large', 'banner_shield_blue', 'barrel_large', 'box_stacked'],
 };

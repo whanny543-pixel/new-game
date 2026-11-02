@@ -32,6 +32,11 @@ export class Hud {
   private comboEl = document.getElementById('combo')!;
   private comboNum = document.getElementById('combo-num')!;
   private perksEl = document.getElementById('perks')!;
+  private woodEl = document.getElementById('wood')!;
+  private stoneEl = document.getElementById('stone')!;
+  private novaBtn = document.getElementById('btn-nova')!;
+  private novaFill = document.getElementById('nova-fill')!;
+  private res = { wood: -1, stone: -1, nova: -1 };
   private perkCards = document.getElementById('perk-cards')!;
   private bumpTimer = 0;
 
@@ -42,6 +47,28 @@ export class Hud {
   /** The counter rolls toward the real value so gains feel like a slot machine. */
   setGold(n: number) {
     this.goldTarget = n;
+  }
+
+  setResources(wood: number, stone: number) {
+    if (wood !== this.res.wood) {
+      this.woodEl.textContent = String(wood);
+      this.woodEl.parentElement!.classList.toggle('bump', wood > this.res.wood && this.res.wood >= 0);
+      this.res.wood = wood;
+    }
+    if (stone !== this.res.stone) {
+      this.stoneEl.textContent = String(stone);
+      this.stoneEl.parentElement!.classList.toggle('bump', stone > this.res.stone && this.res.stone >= 0);
+      this.res.stone = stone;
+    }
+  }
+
+  /** Nova ability button: fills as you kill, glows when ready. */
+  setNova(frac: number) {
+    const p = Math.round(frac * 100);
+    if (p === this.res.nova) return;
+    this.res.nova = p;
+    this.novaFill.style.height = `${p}%`;
+    this.novaBtn.classList.toggle('ready', frac >= 1);
   }
 
   setXp(level: number, frac: number) {
@@ -204,6 +231,9 @@ export class Hud {
     for (const el of [...this.bars.keys()]) this.removeBar(el);
     this.last = { gold: -1, wave: -1, waveP: -1, keep: -1, hint: '' };
     this.goldShown = this.goldTarget = 0;
+    this.res = { wood: -1, stone: -1, nova: -1 };
+    this.setResources(0, 0);
+    this.setNova(0);
     this.goldEl.textContent = '0';
     this.setXp(1, 0);
     this.setCombo(0);

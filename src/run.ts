@@ -18,6 +18,9 @@ import {
   WAVES,
   WORKSHOP,
   coinValue,
+  CASTLE_LEVELS,
+  GATE_TIERS,
+  NOVA,
   type EnemyKind,
   type EnemyType,
   type Place,
@@ -26,6 +29,7 @@ import {
 import * as M from './models';
 import * as S from './structures';
 import type { Horde } from './horde';
+import { Kingdom } from './kingdom';
 import { Plot } from './plot';
 import { BASE_STATS, xpForLevel, type HeroStats, type Perk } from './perks';
 import type { Fx } from './fx';
@@ -126,6 +130,9 @@ interface Barricade {
   lastHit: number;
   shake: number;
   rise: number;
+  /** Gates are sturdier barricades that builders can rebuild from rubble. */
+  rebuildable: boolean;
+  gate?: { tier: number; rubble: THREE.Object3D; right: THREE.Vector3 };
 }
 
 interface Workshop {
@@ -242,6 +249,11 @@ export class Run {
   // Hall
   hall = S.makeHall();
   hallHp = HALL.maxHp;
+  hallMax = HALL.maxHp;
+  private hallRadius = HALL.radius;
+  kingdom: Kingdom;
+  /** 0..1 charge of the hero's Arcane Nova. */
+  nova = 0;
   private hallLastHit = -99;
 
   // Enemies
@@ -290,6 +302,10 @@ export class Run {
     world.openRoad(1, false);
 
     this.root.add(this.hall.root);
+    this.kingdom = new Kingdom(this.root, fx, sfx, {
+      text: (p, m, c) => this.fx.text(p, m, c),
+      push: (p, r) => this.pushOutOfBuildings(p, r),
+    });
     this.root.add(this.hero.root);
     this.hero.root.position.copy(this.heroPos);
 
@@ -351,6 +367,7 @@ export class Run {
 
   /** World position of a plot's pad. On-road structures put their pad on the roadside. */
   placeOf(def: PlotDef) {
+    if (def.pad) return this.resolve(def.pad);
     return this.resolve(def.place, def.kind === 'post' || def.kind === 'barricade');
   }
 
@@ -366,6 +383,15 @@ export class Run {
   reservedSpots() {
     const out: { x: number; z: number; r: number }[] = [{ x: 0, z: 0, r: 6 }];
     for (const p of this.plots) {
+      const k = p.def.kind;
+      if (k === 'camp') out.push({ x: p.pos.x - 4, z: p.pos.z - 5, r: 8.5 }); // the woodcutters' forest
+      if (k === 'camp' || k === 'quarry') out.push({ x: p.pos.x, z: p.pos.z, r: 5.5 });
+      if (k === 'gate') {
+        const g = this.resolve(p.def.place);
+        out.push({ x: g.x, z: g.z, r: 9 });
+      }
+    }
+    for (const p of this.plots) {
       out.push({ x: p.pos.x, z: p.pos.z, r: 3 });
       if (p.def.kind === 'tower') {
         const far = this.towerPadAfter(p.def);
@@ -373,7 +399,7 @@ export class Run {
       }
       const after = SHOP_PAD_AFTER[p.def.id];
       if (after) out.push({ x: after.x, z: after.z, r: 3 });
-      if (['range', 'barracks', 'forge', 'bowyer'].includes(p.def.kind)) out.push({ x: p.pos.x, z: p.pos.z, r: 5 });
+      if (['range', 'barracks', 'forge', 'bowyer', 'castle'].includes(p.def.kind)) out.push({ x: p.pos.x, z: p.pos.z, r: 5 });
     }
     return out;
   }
@@ -457,6 +483,8 @@ export class Run {
     this.updateChests(dt);
     this.updatePlots(dt);
     this.updateHall(dt);
+    this.kingdom.update(dt, [...this.barricades.values()], this.time);
+    this.hud.setResources(this.kingdom.wood, this.kingdom.stone);
     this.updateGuide();
     this.updateStacks(dt);
     this.drawCrowd(dt);
@@ -467,7 +495,7 @@ export class Run {
       this.hud.setCombo(0);
     }
     // Heartbeat vignette while the hall is in danger.
-    if (this.hallHp / HALL.maxHp < 0.3) this.events.hurt(0.25 + Math.sin(this.time * 6) * 0.15);
+    if (this.hallHp / this.hallMax < 0.3) this.events.hurt(0.25 + Math.sin(this.time * 6) * 0.15);
     // Ambient dust motes.
     if (Math.random() < 0.1) this.fx.p.motes(this.heroPos);
   }
@@ -582,7 +610,8 @@ export class Run {
 
   /** Keeps a walker out of the hall and building footprints. */
   private pushOutOfBuildings(p: THREE.Vector3, r: number) {
-    const solid: [number, number, number][] = [[0, -0.2, HALL.radius]];
+    const solid: [number, number, number][] = [[0, -0.2, this.hallRadius]];
+    for (const site of [this.kingdom.camp, this.kingdom.quarry]) if (site) solid.push([site.pos.x, site.pos.z - 0.3, 2]);
     for (const s of this.shops.values()) solid.push([s.pos.x, s.pos.z - 0.2, 1.9]);
     for (const t of this.towers.values()) solid.push([t.pos.x, t.pos.z, 1.15]);
     for (const [x, z, rad] of solid) {
@@ -975,6 +1004,8 @@ export class Run {
     for (let i = 0; i < coins; i++) this.dropCoin(v1, e.type.boss ? 4 : 1.6);
 
     // XP and level-ups.
+    this.nova = Math.min(1, this.nova + (e.type.boss ? 0.3 : 1 / NOVA.killsToCharge));
+    this.hud.setNova(this.nova);
     this.xp += e.type.boss ? 20 : 1;
     while (this.xp >= xpForLevel(this.level)) {
       this.xp -= xpForLevel(this.level);
@@ -1221,12 +1252,20 @@ export class Run {
 
   // ------------------------------------------------------------------ plots & building
 
+  private needMet(r: string) {
+    if (!r) return true;
+    if (r.startsWith('wave:')) return this.wave >= Number(r.slice(5));
+    if (r.startsWith('castle:')) return this.kingdom.castleLevel + 1 >= Number(r.slice(7));
+    return this.isBuilt(r);
+  }
+
   private requirementsMet(def: PlotDef) {
-    return def.requires.every((r) => (r.startsWith('wave:') ? this.wave >= Number(r.slice(5)) : this.isBuilt(r)));
+    return def.requires.every((r) => this.needMet(r));
   }
 
   private plotVisible(p: Plot) {
     if (p.maxed || !this.requirementsMet(p.def)) return false;
+    if (!this.needMet(p.def.levelNeeds?.[p.level] ?? '')) return false;
     if (p.def.kind === 'barricade') return !this.barricades.get(p.def.id)?.alive;
     if (p.def.kind === 'recruitArcher') return this.openSpots('archer') > 0;
     if (p.def.kind === 'recruitKnight') return this.openSpots('knight') > 0;
@@ -1236,6 +1275,7 @@ export class Run {
   private updatePlots(dt: number) {
     let on: Plot | null = null;
     for (const p of this.plots) {
+      p.setStock(this.kingdom.wood, this.kingdom.stone);
       p.show(this.plotVisible(p));
       if (!p.shown || !this.heroAlive) continue;
       const dx = this.heroPos.x - p.pos.x;
@@ -1249,7 +1289,8 @@ export class Run {
     }
     for (const p of this.plots) p.update(dt, p === on);
 
-    if (on && this.carry > 0 && on.paid + on.pending < on.cost) {
+    if (on && !on.stocked && on.paid === 0) this.hud.hint(this.missingHint(on));
+    if (on && on.stocked && this.carry > 0 && on.paid + on.pending < on.cost) {
       // Pay faster the longer you stand there: a big stack drains in a satisfying rush.
       this.payStreak += dt;
       const rate = Math.min(45, 7 + this.payStreak * 26);
@@ -1277,6 +1318,7 @@ export class Run {
   completePlot(p: Plot) {
     const def = p.def;
     const lvl = p.level;
+    if (p.woodCost || p.stoneCost) this.kingdom.spend(Math.min(p.woodCost, this.kingdom.wood), Math.min(p.stoneCost, this.kingdom.stone), p.pos);
     p.level++;
     p.paid = 0;
     this.sfx.build();
@@ -1305,6 +1347,26 @@ export class Run {
       case 'forge':
       case 'bowyer':
         this.buildShop(p, def.kind, lvl);
+        break;
+      case 'camp':
+        this.kingdom.buildCamp(this.resolve(def.place), lvl);
+        if (lvl === 0) {
+          p.setPos(-10.8, -14.4);
+          this.fx.text(v2.copy(p.pos).setY(4), 'Lumber Camp! Woodcutters at work', 'good');
+        } else this.fx.text(v2.copy(p.pos).setY(4), '+1 woodcutter', 'good');
+        break;
+      case 'quarry':
+        this.kingdom.buildQuarry(this.resolve(def.place), lvl);
+        if (lvl === 0) {
+          p.setPos(-14.2, 11.4);
+          this.fx.text(v2.copy(p.pos).setY(4), 'Quarry! Miners at work', 'good');
+        } else this.fx.text(v2.copy(p.pos).setY(4), '+1 miner', 'good');
+        break;
+      case 'castle':
+        this.upgradeCastle(lvl + 1);
+        break;
+      case 'gate':
+        this.buildGate(p, lvl);
         break;
       case 'recruitArcher':
       case 'recruitKnight': {
@@ -1382,7 +1444,7 @@ export class Run {
       mesh.rotation.y = Math.atan2(v2.x, v2.z);
       this.root.add(mesh);
       const hp = BARRICADE_HP[pl.road === 0 ? 0 : 1];
-      b = { plot: p, road: pl.road, s, hp, maxHp: hp, alive: true, mesh, pos, lastHit: -99, shake: 0, rise: 0 };
+      b = { plot: p, road: pl.road, s, hp, maxHp: hp, alive: true, mesh, pos, lastHit: -99, shake: 0, rise: 0, rebuildable: false };
       this.barricades.set(def.id, b);
     }
     b.alive = true;
@@ -1683,9 +1745,18 @@ export class Run {
     b.hp -= dmg;
     b.lastHit = this.time;
     b.shake = 1;
-    if (b.hp <= 0) {
+    if (b.hp <= 0 && b.alive) {
       b.alive = false;
       b.mesh.visible = false;
+      if (b.gate) {
+        b.gate.rubble.visible = true;
+        this.hud.banner('The gate has fallen!', true);
+        this.fx.shake = Math.max(this.fx.shake, 0.7);
+        this.events.haptic(true);
+        // Archers on the wall come down with it.
+        const t = this.towers.get(b.plot.def.id + '_wall');
+        if (t) t.rig.root.visible = false;
+      }
       this.fx.burst(v1.copy(b.pos).setY(0.6), COLORS.wood, 22, 5);
       this.fx.p.explosion(v1);
       this.sfx.pop();
@@ -1694,12 +1765,23 @@ export class Run {
 
   private updateBarricades(dt: number) {
     for (const b of this.barricades.values()) {
+      if (b.gate && !b.alive && b.hp >= b.maxHp * 0.5) {
+        // Builders have put it back together.
+        b.alive = true;
+        b.mesh.visible = true;
+        b.rise = 0;
+        b.gate.rubble.visible = false;
+        const t = this.towers.get(b.plot.def.id + '_wall');
+        if (t) t.rig.root.visible = true;
+        this.fx.p.build(v1.copy(b.pos).setY(0.5));
+        this.fx.text(v1.copy(b.pos).setY(3), 'Gate rebuilt!', 'good');
+      }
       if (!b.alive) continue;
       b.rise = Math.min(1, b.rise + dt * 4);
       b.shake = Math.max(0, b.shake - dt * 5);
       b.mesh.scale.y = Math.max(0.02, b.rise);
       b.mesh.position.x = b.pos.x + (Math.random() - 0.5) * b.shake * 0.12;
-      if (this.time - b.lastHit > 5) b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.04 * dt);
+      if (!b.gate && this.time - b.lastHit > 5) b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.04 * dt);
     }
   }
 
@@ -1810,9 +1892,9 @@ export class Run {
   }
 
   private updateHall(dt: number) {
-    if (this.time - this.hallLastHit > 5) this.hallHp = Math.min(HALL.maxHp, this.hallHp + HALL.regen * dt);
+    if (this.time - this.hallLastHit > 5) this.hallHp = Math.min(this.hallMax, this.hallHp + HALL.regen * dt);
     this.hall.banners.children.forEach((b, i) => (b.rotation.y = Math.sin(this.time * 2 + i) * 0.2));
-    this.hud.setKeep(this.hallHp / HALL.maxHp);
+    this.hud.setKeep(this.hallHp / this.hallMax);
   }
 
   // ------------------------------------------------------------------ guidance
@@ -1859,7 +1941,7 @@ export class Run {
     }
     // 4. The cheapest-to-reach plot we can afford.
     if (this.carry > 0) {
-      const ok = this.plots.filter((p) => p.shown && p.remaining <= this.carry).map((p) => p.pos);
+      const ok = this.plots.filter((p) => p.shown && p.stocked && p.remaining <= this.carry).map((p) => p.pos);
       if (ok.length) return nearest(ok);
     }
     return null;
@@ -1882,6 +1964,126 @@ export class Run {
     }
   }
 
+  private missingHint(p: Plot) {
+    const w = Math.max(0, p.woodCost - this.kingdom.wood);
+    const st = Math.max(0, p.stoneCost - this.kingdom.stone);
+    if (w && !this.kingdom.camp) return `Needs ${w} wood. Build a Lumber Camp`;
+    if (st && !this.kingdom.quarry) return `Needs ${st} stone. Build a Quarry`;
+    return `Waiting for ${[w ? `${w} wood` : '', st ? `${st} stone` : ''].filter(Boolean).join(' and ')} from your workers`;
+  }
+
+  /** Castle upgrades: more health, more builders and townsfolk, and a bigger castle. */
+  private upgradeCastle(level: number) {
+    const L = CASTLE_LEVELS[Math.min(level, CASTLE_LEVELS.length - 1)];
+    this.kingdom.setCastleLevel(Math.min(level, CASTLE_LEVELS.length - 1));
+    const frac = this.hallHp / this.hallMax;
+    this.hallMax = L.hp;
+    this.hallHp = Math.min(this.hallMax, frac * this.hallMax + this.hallMax * 0.25);
+    const scale = 1 + level * 0.1;
+    this.hall.root.scale.setScalar(scale);
+    this.hallRadius = HALL.radius * scale;
+    this.hud.banner(`Your Keep is now a ${L.name}!`, false);
+    this.fx.pillar(v1.set(0, 0, 0), 0xffe08a, 5, 1.4);
+    this.fx.ring(v1, 0xffd34d, 12, 0.9);
+    this.fx.p.levelUp(v1.set(0, 3, 0));
+    this.events.flash(0.5);
+    this.sfx.levelUp();
+  }
+
+  /** Gatehouse on a road: wooden, then stone, then a castle wall with archer posts. */
+  private buildGate(p: Plot, lvl: number) {
+    const def = p.def;
+    const tier = GATE_TIERS[Math.min(lvl, GATE_TIERS.length - 1)];
+    const pl = def.place as { road: number; t: number };
+    const road = this.roads[pl.road];
+    const s = road.length * pl.t;
+    const pos = road.point(s, 0, new THREE.Vector3());
+    road.tangent(s, v2);
+    const right = new THREE.Vector3(-v2.z, 0, v2.x);
+    const span = ROAD_HALF_WIDTH * 2 + 0.8;
+    // Keep wings clear of towers, buildings, plots and the other road.
+    const blockers: { x: number; z: number; r: number }[] = [{ x: 0, z: 0, r: this.hallRadius + 1.5 }];
+    for (const q of this.plots) if (q !== p && q.def.kind !== 'gate') blockers.push({ x: q.pos.x, z: q.pos.z, r: 1.8 });
+    for (const t of this.towers.values()) blockers.push({ x: t.pos.x, z: t.pos.z, r: 2 });
+    for (const sh of this.shops.values()) blockers.push({ x: sh.pos.x, z: sh.pos.z, r: 3 });
+    const canPlace = (x: number) => {
+      const wx = pos.x + right.x * x;
+      const wz = pos.z + right.z * x;
+      if (blockers.some((b) => Math.hypot(wx - b.x, wz - b.z) < b.r + 1.2)) return false;
+      return this.roads.every((r, i) => i === pl.road || r.distanceTo(wx, wz) > ROAD_HALF_WIDTH + 1);
+    };
+    const group = S.makeGate(tier.gate, tier.wall, span, canPlace, tier.archers > 0);
+    group.position.copy(pos);
+    group.rotation.y = Math.atan2(v2.x, v2.z);
+    this.root.add(group);
+
+    let b = this.barricades.get(def.id);
+    if (!b) {
+      const rubble = S.prop('building_destroyed', span * 0.8, 'max');
+      rubble.position.copy(pos);
+      rubble.visible = false;
+      this.root.add(rubble);
+      b = { plot: p, road: pl.road, s, hp: tier.hp, maxHp: tier.hp, alive: true, mesh: group, pos, lastHit: -99, shake: 0, rise: 0, rebuildable: true, gate: { tier: lvl, rubble, right } };
+      this.barricades.set(def.id, b);
+    } else {
+      this.root.remove(b.mesh);
+      b.mesh = group;
+      b.gate!.tier = lvl;
+      b.maxHp = tier.hp;
+      b.hp = tier.hp;
+      b.alive = true;
+      b.gate!.rubble.visible = false;
+    }
+    b.rise = 0;
+    this.fx.p.build(v1.copy(pos).setY(0.5));
+    this.fx.ring(pos, 0xffe08a, 9, 0.7);
+    this.fx.text(v1.copy(pos).setY(4), `${tier.name}!`, 'good');
+    this.hud.banner(`${tier.name} raised!`, false);
+
+    // The castle gate has a walkway with archer posts.
+    if (tier.archers > 0 && !this.towers.has(def.id + '_wall')) {
+      const H = 3.1;
+      const rig: S.TowerRig = {
+        root: group,
+        roof: new THREE.Group(),
+        ballista: new THREE.Group(),
+        base: new THREE.Group(),
+        slots: [new THREE.Vector3(-1.6, H, -0.3), new THREE.Vector3(1.6, H, -0.3)],
+      };
+      const t: Tower = { plot: p, pos: pos.clone(), rig, level: 1, units: [null, null], ballistaCd: 0, grow: 1, label: this.hud.worldLabel('archer') };
+      this.towers.set(def.id + '_wall', t);
+    }
+  }
+
+  /** Arcane Nova: blast every enemy near the hero and shove them back up the road. */
+  castNova() {
+    if (this.nova < 1 || !this.heroAlive || this.over) return false;
+    this.nova = 0;
+    this.hud.setNova(0);
+    const r2 = NOVA.radius * NOVA.radius;
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      if ((e.x - this.heroPos.x) ** 2 + (e.z - this.heroPos.z) ** 2 > r2) continue;
+      if (!e.type.boss) e.s = Math.max(0, e.s - NOVA.knockback);
+      e.spawnT = 0;
+      this.hitEnemy(e, Math.round(NOVA.damage * this.stats.damage), true);
+    }
+    v1.copy(this.heroPos);
+    this.fx.ring(v1, 0x9fe8ff, NOVA.radius * 1.2, 0.6);
+    this.fx.ring(v1, 0xffffff, NOVA.radius * 0.8, 0.4);
+    this.fx.pillar(v1, 0x9fe8ff, 2, 0.8);
+    this.fx.p.emit({ pos: v1.clone().setY(1), count: 80, color: [0x9fe8ff, 0xffffff, 0xb48bff], speed: 16, up: 2, size: 0.45, life: 0.6, gravity: 2, drag: 2.5, shape: 1 });
+    this.fx.shake = Math.max(this.fx.shake, 1);
+    this.fx.punch = 1;
+    this.hitstop = 0.12;
+    this.events.flash(0.7);
+    this.events.haptic(true);
+    this.hero.char.once('Spellcast_Shoot', 1.2);
+    this.sfx.boom();
+    this.sfx.levelUp();
+    return true;
+  }
+
   private currentHint() {
     if (!this.heroAlive) return `Back in ${Math.ceil(this.respawnT)}…`;
     const built = (id: string) => this.isBuilt(id);
@@ -1896,6 +2098,9 @@ export class Run {
     if (built('range') && this.units.filter((u) => u.type === 'archer').length < 2) return 'Recruit an archer at the range';
     if (built('gp1') && !built('barracks')) return 'Build Barracks to recruit knights';
     if (built('barracks') && !this.units.some((u) => u.type === 'knight')) return 'Recruit knights to hold the road';
+    if (built('tw2') && !built('camp')) return 'Build a Lumber Camp: woodcutters will gather wood';
+    if (built('camp') && !built('gateA')) return 'Raise a gate across the road to shield the castle';
+    if (this.nova >= 1 && this.enemies.length > 4) return 'Arcane Nova is ready! Tap the button';
     if (this.weapons.length) {
       const k = this.weapons[this.weapons.length - 1].kind;
       return k === 'sword' ? 'Walk up to your knights to hand over swords' : 'Walk up to your archers to hand over crossbows';
@@ -1912,6 +2117,7 @@ export class Run {
   // ------------------------------------------------------------------ teardown
 
   dispose() {
+    this.kingdom.dispose();
     this.scene.remove(this.root);
     for (const p of this.plots) p.dispose();
     for (const e of this.enemies) if (e.bar) this.hud.removeBar(e.bar);

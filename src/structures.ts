@@ -244,7 +244,7 @@ export function makeShop(kind: 'range' | 'barracks' | 'forge' | 'bowyer'): Works
     range: 'building_archeryrange_blue',
     barracks: 'building_barracks_blue',
     forge: 'building_blacksmith_blue',
-    bowyer: 'building_lumbermill_blue',
+    bowyer: 'building_market_blue',
   }[kind];
   const b = A.prop(model, 4.6, 'max');
   b.rotation.y = Math.PI;
@@ -284,6 +284,50 @@ export function makeChest() {
     if (o.name === 'chest_gold_lid') lid = o;
   });
   return { root, lid };
+}
+
+/** Kingdom folk: woodcutters/builders ('worker') and townsfolk/miners ('villager'). */
+export function makeNpc(kind: 'worker' | 'villager') {
+  const char = A.character(kind, kind === 'worker' ? 1.6 : 1.5);
+  char.root.add(blobShadow(0.38));
+  char.loop('Idle');
+  return char;
+}
+
+/**
+ * A gatehouse spanning the road with wall wings to either side. Local x runs across the road.
+ * `canPlace(localX)` lets the caller stop a wing before it runs into something.
+ */
+export function makeGate(gateModel: string, wallModel: string, span: number, canPlace: (x: number) => boolean, castle: boolean) {
+  const g = new THREE.Group();
+  const height = castle ? 3.6 : 2.4;
+  const gate = A.prop(gateModel, span, 'max');
+  orientAlongX(gate);
+  g.add(gate);
+  const seg = castle ? 2.6 : 2.2;
+  for (const side of [-1, 1]) {
+    let x = side * (span / 2 + seg / 2);
+    for (let i = 0; i < 4; i++) {
+      if (!canPlace(x)) break;
+      const w = A.prop(wallModel, seg + 0.05, 'max');
+      orientAlongX(w);
+      w.position.x = x;
+      g.add(w);
+      x += side * seg;
+    }
+    // A flag marks each end of the wall.
+    const f = A.prop('flag_blue', height * 0.9);
+    f.position.set(x - side * seg * 0.5, 0, 0);
+    g.add(f);
+  }
+  return g;
+}
+
+/** Rotates a wall-like model so its long side runs along local x. */
+function orientAlongX(o: THREE.Object3D) {
+  const box = new THREE.Box3().setFromObject(o);
+  const s = box.getSize(new THREE.Vector3());
+  if (s.z > s.x) o.rotation.y = Math.PI / 2;
 }
 
 export function prop(name: string, size: number, axis: 'y' | 'x' | 'z' | 'max' = 'y') {

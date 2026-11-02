@@ -152,7 +152,11 @@ export type PlotKind =
   | 'forge'
   | 'bowyer'
   | 'recruitArcher'
-  | 'recruitKnight';
+  | 'recruitKnight'
+  | 'camp'
+  | 'quarry'
+  | 'gate'
+  | 'castle';
 
 /** Where a plot sits: fixed coordinates, or beside/on a road at a fraction of its length. */
 export type Place = { x: number; z: number } | { road: number; t: number; side: number; dist: number };
@@ -162,8 +166,15 @@ export interface PlotDef {
   kind: PlotKind;
   place: Place;
   costs: number[];
-  /** Plot ids that must be built first; "wave:N" waits for wave N. */
+  /** Kingdom wood / stone needed per level (paid from the stockpile when the gold is in). */
+  wood?: number[];
+  stone?: number[];
+  /** Plot ids that must be built first; "wave:N" waits for wave N, "castle:N" for castle level N. */
   requires: string[];
+  /** Extra requirement per level, e.g. a stone gate needs castle level 2. */
+  levelNeeds?: string[];
+  /** Where the pad sits if not on the building itself (gates sit on the road). */
+  pad?: Place;
 }
 
 const recruitCosts = (start: number, step: number) => Array.from({ length: 60 }, (_, i) => start + i * step);
@@ -188,9 +199,65 @@ export const PLOTS: PlotDef[] = [
   { id: 'tw6', kind: 'tower', place: { road: 1, t: 0.55, side: -1, dist: 3.8 }, costs: [40, 95, 200], requires: ['wave:7'] },
   { id: 'gp3', kind: 'post', place: { road: 1, t: 0.68, side: 0, dist: 0 }, costs: [35, 90], requires: ['wave:7'] },
   { id: 'bar3', kind: 'barricade', place: { road: 1, t: 0.74, side: 0, dist: 0 }, costs: [25], requires: ['wave:7'] },
+  // --- Kingdom ---
+  { id: 'camp', kind: 'camp', place: { x: -15, z: -11 }, costs: [20, 60, 140], requires: ['tw2'] },
+  { id: 'quarry', kind: 'quarry', place: { x: -18, z: 8 }, costs: [30, 80, 170], wood: [10, 25, 50], requires: ['camp'] },
+  { id: 'castle', kind: 'castle', place: { x: -4.6, z: 4.6 }, costs: [50, 130, 280], wood: [20, 50, 100], stone: [0, 30, 80], requires: ['camp'] },
+  {
+    id: 'gateA',
+    kind: 'gate',
+    place: { road: 0, t: 0.92, side: 0, dist: 0 },
+    pad: { road: 0, t: 0.975, side: -1, dist: 3.3 },
+    costs: [25, 60, 130],
+    wood: [15, 0, 30],
+    stone: [0, 30, 60],
+    levelNeeds: ['', 'castle:2', 'castle:3'],
+    requires: ['camp'],
+  },
+  {
+    id: 'gateB',
+    kind: 'gate',
+    place: { road: 1, t: 0.86, side: 0, dist: 0 },
+    pad: { road: 1, t: 0.93, side: 1, dist: 3.3 },
+    costs: [30, 70, 150],
+    wood: [18, 0, 35],
+    stone: [0, 35, 70],
+    levelNeeds: ['', 'castle:2', 'castle:3'],
+    requires: ['camp', 'wave:7'],
+  },
   { id: 'tw7', kind: 'tower', place: { road: 0, t: 0.18, side: 1, dist: 3.8 }, costs: [50, 110, 230], requires: ['tw4', 'wave:8'] },
   { id: 'tw8', kind: 'tower', place: { road: 1, t: 0.32, side: 1, dist: 3.8 }, costs: [55, 120, 240], requires: ['tw6', 'wave:9'] },
 ];
 
 /** On-road plots (posts, barricades) put their pad beside the road on this side. */
 export const ROADSIDE_PAD = { side: -1, dist: 3.6 };
+
+// ------------------------------------------------------------------ kingdom
+
+export const CASTLE_LEVELS = [
+  { name: 'Keep', hp: 1200, builders: 1, villagers: 3 },
+  { name: 'Castle', hp: 1700, builders: 2, villagers: 5 },
+  { name: 'Stronghold', hp: 2300, builders: 2, villagers: 7 },
+  { name: 'Citadel', hp: 3000, builders: 3, villagers: 9 },
+];
+
+export const GATE_TIERS = [
+  { name: 'Wooden Gate', hp: 500, gate: 'fence_wood_straight_gate', wall: 'fence_wood_straight', archers: 0 },
+  { name: 'Stone Gate', hp: 1300, gate: 'fence_stone_straight_gate', wall: 'fence_stone_straight', archers: 0 },
+  { name: 'Castle Gate', hp: 2600, gate: 'wall_straight_gate', wall: 'wall_straight', archers: 2 },
+];
+
+export const WORKERS = {
+  speed: 3.4,
+  chopTime: 2.6,
+  woodPerTrip: 4,
+  mineTime: 3.2,
+  stonePerTrip: 4,
+  /** Woodcutters / miners per building level. */
+  perLevel: [2, 3, 4],
+  treeRegrow: 18,
+  repairRate: 45, // hp per second per builder
+};
+
+/** Active ability: charged by kills, blasts the horde around the hero. */
+export const NOVA = { killsToCharge: 35, radius: 7.5, damage: 160, knockback: 3.2 };

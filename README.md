@@ -12,6 +12,13 @@ Skeleton hordes march down winding roads toward your castle. Your hero shoots on
 - A second road opens at wave 7, and a troll boss arrives every 4th wave. Trolls drop treasure chests.
 - **Hero levels:** every kill gives XP. Each level offers three perk cards (Volley, Fire Arrows, Storm Bolts, Keen Eye, War Banner, Golden Touch and more).
 - **Combos:** chain kills quickly for streak bonuses. Coins are worth more as the waves climb.
+- **Arcane Nova:** an ability button that charges from kills and blasts the horde back.
+
+**The kingdom**
+- **Lumber Camp:** woodcutters walk to the trees, chop them down (they regrow) and haul logs back. **Quarry:** miners go into the mine and come out with stone. Wood and stone go into a shared stockpile shown in the HUD.
+- **Gatehouses** on each road: Wooden Gate → Stone Gate → Castle Gate (with archer posts on the wall). Wall wings extend to either side. Bigger upgrades cost wood and stone as well as gold.
+- **Builders** walk out to repair damaged gates and barricades between attacks, and rebuild fallen gates from the rubble.
+- **Castle upgrades** (Keep → Castle → Stronghold → Citadel) add health, builders and townsfolk, and unlock better gates. Townsfolk wander the village, chat and sit around.
 
 A dotted trail always points to the most useful next step, and a hint line at the bottom explains it.
 
@@ -69,6 +76,7 @@ The script keeps only the animations the game uses, bundles all static models in
 | `src/world.ts` | Meadow terrain, roads, scenery (merged into chunks), lighting |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
 | `src/perks.ts` | Level-up perk deck |
+| `src/kingdom.ts` | Wood/stone stockpile, woodcutters, miners, builders and townsfolk |
 | `src/render.ts` | Post-processing: bloom, colour grade, vignette, adaptive quality |
 | `src/materials.ts` | PBR materials with world-space detail texture, baked environment light |
 | `src/particles.ts` | GPU point-sprite particles and effect presets |

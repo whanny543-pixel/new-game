@@ -34,7 +34,14 @@
         <div class="xp">
           <span class="xp-badge"><small>LV</small><b id="xp-level">1</b></span>
           <div class="xp-bar"><i id="xp-fill"></i></div>
+          <span class="pill res"><i class="res-ico wood"></i><span id="wood">0</span></span>
+          <span class="pill res"><i class="res-ico stone"></i><span id="stone">0</span></span>
         </div>
+        <button id="btn-nova" aria-label="Arcane Nova">
+          <span id="nova-fill"></span>
+          <svg viewBox="0 0 24 24"><path d="M12 2l2.2 6.6L21 9l-5.4 4.1L17.6 20 12 16.1 6.4 20l2-6.9L3 9l6.8-.4z"/></svg>
+          <small>NOVA</small>
+        </button>
         <div id="combo"><span id="combo-num">×3</span><small>combo</small></div>
         <div class="side">
           <button id="btn-pause" class="round" aria-label="Pause">
@@ -63,7 +70,8 @@
             <li><b>Stand on a plot</b> to spend gold on towers, posts and workshops</li>
             <li><b>Recruit</b> archers and knights, then lead them to their posts</li>
             <li><b>Carry</b> new swords and crossbows from the Forge and Bowyer to your troops</li>
-            <li><b>Level up</b> and pick powers: volleys, fire arrows, storm bolts</li>
+            <li><b>Grow your kingdom:</b> woodcutters and miners gather wood and stone for gates and castle upgrades</li>
+            <li><b>Level up</b> and pick powers, then unleash <b>Nova</b> when it's charged</li>
           </ul>
           <button id="btn-play" class="cta">Play</button>
           <p class="best" id="best"></p>

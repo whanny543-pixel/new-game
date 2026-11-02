@@ -16,6 +16,16 @@ const LABEL: Record<PlotKind, string> = {
   bowyer: 'Bowyer',
   recruitArcher: 'Recruit Archer',
   recruitKnight: 'Recruit Knight',
+  camp: 'Lumber Camp',
+  quarry: 'Quarry',
+  gate: 'Gate',
+  castle: 'Castle',
+};
+
+/** Some plots name each level (gates: Wooden → Stone → Castle). */
+const LEVEL_NAMES: Partial<Record<PlotKind, string[]>> = {
+  gate: ['Wooden Gate', 'Stone Gate', 'Castle Gate'],
+  castle: ['Castle', 'Stronghold', 'Citadel'],
 };
 
 /** Repeating plots (recruiting) don't show a level number. */
@@ -36,6 +46,8 @@ export class Plot {
   private plane: THREE.Mesh;
   private drawnKey = '';
   private pulse = 0;
+  /** Kingdom stockpile, so missing wood/stone can be shown in red. */
+  private stock = { wood: 0, stone: 0 };
 
   constructor(readonly def: PlotDef) {
     this.canvas.width = this.canvas.height = PX;
@@ -68,6 +80,21 @@ export class Plot {
   get maxed() {
     return this.level >= this.def.costs.length;
   }
+  get woodCost() {
+    return this.def.wood?.[this.level] ?? 0;
+  }
+  get stoneCost() {
+    return this.def.stone?.[this.level] ?? 0;
+  }
+  /** Whether the kingdom stockpile covers this level's wood and stone. */
+  get stocked() {
+    return this.stock.wood >= this.woodCost && this.stock.stone >= this.stoneCost;
+  }
+
+  setStock(wood: number, stone: number) {
+    this.stock.wood = wood;
+    this.stock.stone = stone;
+  }
 
   show(on: boolean) {
     if (on === this.shown) return;
@@ -92,7 +119,8 @@ export class Plot {
   }
 
   private redraw(active: boolean) {
-    const key = `${this.level}|${this.paid}|${active}`;
+    const needs = this.woodCost > 0 || this.stoneCost > 0;
+    const key = `${this.level}|${this.paid}|${active}|${needs ? `${this.stock.wood >= this.woodCost}${this.stock.stone >= this.stoneCost}` : ''}`;
     if (key === this.drawnKey) return;
     this.drawnKey = key;
     const g = this.ctx;
@@ -128,18 +156,22 @@ export class Plot {
 
     // Icon
     g.save();
-    g.translate(W / 2, 96);
+    g.translate(W / 2, needs ? 76 : 96);
+    if (needs) g.scale(0.8, 0.8);
     drawIcon(g, this.def.kind);
     g.restore();
 
     // Label
     const lvl = !REPEATING.has(this.def.kind) && this.level > 0 ? ` ${roman(this.level + 1)}` : '';
-    const label = LABEL[this.def.kind] + lvl;
+    const named = LEVEL_NAMES[this.def.kind];
+    const label = named ? named[Math.min(this.level, named.length - 1)] : LABEL[this.def.kind] + lvl;
     g.font = `bold ${label.length > 13 ? 22 : 26}px "Lilita One", "Trebuchet MS", sans-serif`;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillStyle = '#fff4d6';
-    g.fillText(label, W / 2, 158);
+    const ly = needs ? 130 : 158;
+    g.fillText(label, W / 2, ly);
+    const cy = needs ? 170 : 204;
 
     // Cost: coin + number
     const txt = String(this.remaining);
@@ -147,7 +179,7 @@ export class Plot {
     const tw = g.measureText(txt).width;
     const cx = W / 2 - (tw + 40) / 2 + 16;
     g.beginPath();
-    g.arc(cx, 204, 16, 0, Math.PI * 2);
+    g.arc(cx, cy, 16, 0, Math.PI * 2);
     g.fillStyle = '#ffc928';
     g.fill();
     g.lineWidth = 4;
@@ -157,8 +189,27 @@ export class Plot {
     g.lineWidth = 7;
     g.strokeStyle = '#3a2410';
     g.textAlign = 'left';
-    g.strokeText(txt, cx + 24, 206);
-    g.fillText(txt, cx + 24, 206);
+    g.strokeText(txt, cx + 24, cy + 2);
+    g.fillText(txt, cx + 24, cy + 2);
+
+    // Wood / stone row: green when the stockpile covers it, red when it doesn't.
+    if (needs) {
+      const items: [string, number, boolean][] = [];
+      if (this.woodCost) items.push(['wood', this.woodCost, this.stock.wood >= this.woodCost]);
+      if (this.stoneCost) items.push(['stone', this.stoneCost, this.stock.stone >= this.stoneCost]);
+      g.font = 'bold 32px "Lilita One", "Trebuchet MS", sans-serif';
+      const widths = items.map(([, n]) => 34 + g.measureText(String(n)).width);
+      let x = W / 2 - (widths.reduce((a, b) => a + b, 0) + (items.length - 1) * 16) / 2;
+      items.forEach(([kind, n, ok], i) => {
+        drawResIcon(g, kind as 'wood' | 'stone', x + 12, 218);
+        g.fillStyle = ok ? '#b8ff9a' : '#ff7a6b';
+        g.lineWidth = 6;
+        g.strokeStyle = '#2a1608';
+        g.strokeText(String(n), x + 28, 220);
+        g.fillText(String(n), x + 28, 220);
+        x += widths[i] + 16;
+      });
+    }
 
     this.tex.needsUpdate = true;
   }
@@ -168,6 +219,37 @@ export class Plot {
     (this.plane.material as THREE.Material).dispose();
     this.plane.geometry.dispose();
   }
+}
+
+/** Small log / stone icons for resource costs. */
+export function drawResIcon(g: CanvasRenderingContext2D, kind: 'wood' | 'stone', x: number, y: number) {
+  g.save();
+  g.translate(x, y);
+  g.lineWidth = 3;
+  g.strokeStyle = '#2a1608';
+  if (kind === 'wood') {
+    g.fillStyle = '#b5773e';
+    g.beginPath();
+    g.ellipse(0, 0, 13, 9, -0.4, 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+    g.fillStyle = '#e8c08a';
+    g.beginPath();
+    g.ellipse(6, -3, 5, 4, -0.4, 0, Math.PI * 2);
+    g.fill();
+  } else {
+    g.fillStyle = '#b9b6ae';
+    g.beginPath();
+    g.moveTo(-12, 6);
+    g.lineTo(-8, -8);
+    g.lineTo(6, -11);
+    g.lineTo(13, 2);
+    g.lineTo(5, 10);
+    g.closePath();
+    g.fill();
+    g.stroke();
+  }
+  g.restore();
 }
 
 function plus(g: CanvasRenderingContext2D) {
@@ -276,6 +358,51 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       g.lineTo(-10, 14);
       g.lineTo(-14, -4);
       g.quadraticCurveTo(-30, -6, -40, -22);
+      g.closePath();
+      break;
+    case 'camp':
+      // Axe in a stump
+      g.rect(-34, 14, 68, 26);
+      g.moveTo(-6, 16);
+      g.lineTo(18, -36);
+      g.lineTo(26, -32);
+      g.lineTo(4, 18);
+      g.closePath();
+      g.moveTo(12, -40);
+      g.quadraticCurveTo(40, -36, 36, -12);
+      g.lineTo(18, -22);
+      g.closePath();
+      break;
+    case 'quarry':
+      // Pile of rocks
+      g.moveTo(-40, 38);
+      g.lineTo(-30, 4);
+      g.lineTo(-10, -6);
+      g.lineTo(2, -30);
+      g.lineTo(24, -20);
+      g.lineTo(32, 6);
+      g.lineTo(40, 38);
+      g.closePath();
+      break;
+    case 'gate':
+      // Arched gate between two pillars
+      g.rect(-40, -34, 18, 74);
+      g.rect(22, -34, 18, 74);
+      g.moveTo(-22, 40);
+      g.lineTo(-22, -6);
+      g.quadraticCurveTo(0, -30, 22, -6);
+      g.lineTo(22, 40);
+      g.closePath();
+      break;
+    case 'castle':
+      // Crown
+      g.moveTo(-38, 30);
+      g.lineTo(-38, -24);
+      g.lineTo(-18, -2);
+      g.lineTo(0, -34);
+      g.lineTo(18, -2);
+      g.lineTo(38, -24);
+      g.lineTo(38, 30);
       g.closePath();
       break;
     case 'bowyer':

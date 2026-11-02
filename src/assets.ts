@@ -12,10 +12,12 @@ import minionUrl from './assets/models/skel_minion.glb?url';
 import rogueUrl from './assets/models/skel_rogue.glb?url';
 import warriorUrl from './assets/models/skel_warrior.glb?url';
 import propsUrl from './assets/models/props.glb?url';
+import workerUrl from './assets/models/worker.glb?url';
+import villagerUrl from './assets/models/villager.glb?url';
 
 // 3D models by Kay Lousberg (KayKit, CC0): www.kaylousberg.com
 
-export type CharName = 'hero' | 'archer' | 'knight' | 'minion' | 'rogue' | 'warrior';
+export type CharName = 'hero' | 'archer' | 'knight' | 'minion' | 'rogue' | 'warrior' | 'worker' | 'villager';
 
 const CHAR_URLS: Record<CharName, string> = {
   hero: heroUrl,
@@ -24,6 +26,8 @@ const CHAR_URLS: Record<CharName, string> = {
   minion: minionUrl,
   rogue: rogueUrl,
   warrior: warriorUrl,
+  worker: workerUrl,
+  villager: villagerUrl,
 };
 
 export interface CharTemplate {

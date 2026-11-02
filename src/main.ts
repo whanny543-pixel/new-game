@@ -116,11 +116,15 @@ class Game {
       this.newRun();
     });
     on('btn-mute', () => this.setMuted(!this.sfx.muted));
+    on('btn-nova', () => {
+      if (this.state === 'playing') this.run?.castNova();
+    });
     // Keep joystick from starting when tapping HUD buttons.
-    for (const id of ['btn-pause', 'btn-mute']) {
+    for (const id of ['btn-pause', 'btn-mute', 'btn-nova']) {
       document.getElementById(id)!.addEventListener('pointerdown', (e) => e.stopPropagation());
     }
     window.addEventListener('keydown', (e) => {
+      if (e.key === ' ' && this.state === 'playing') this.run?.castNova();
       if (e.key === 'Escape' || e.key === 'p') {
         if (this.state === 'playing') this.pause();
         else if (this.state === 'paused') this.resume();
