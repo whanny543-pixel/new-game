@@ -162,5 +162,5 @@ export function rollPerks(owned: Record<string, number>, n = 3): Perk[] {
 }
 
 export function xpForLevel(level: number) {
-  return 5 + level * 5;
+  return 6 + level * 6;
 }

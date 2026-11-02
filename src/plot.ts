@@ -18,14 +18,14 @@ const LABEL: Record<PlotKind, string> = {
   recruitKnight: 'Recruit Knight',
   camp: 'Lumber Camp',
   quarry: 'Quarry',
-  gate: 'Gate',
+  farm: 'Farm',
   castle: 'Castle',
 };
 
 /** Some plots name each level (gates: Wooden → Stone → Castle). */
 const LEVEL_NAMES: Partial<Record<PlotKind, string[]>> = {
-  gate: ['Wooden Gate', 'Stone Gate', 'Castle Gate'],
-  castle: ['Castle', 'Stronghold', 'Citadel'],
+  // The castle plot names the level you're building next.
+  castle: ['Wooden Hall', 'Timber Fort', 'Stone Keep', 'Castle', 'Citadel'],
 };
 
 /** Repeating plots (recruiting) don't show a level number. */
@@ -47,7 +47,7 @@ export class Plot {
   private drawnKey = '';
   private pulse = 0;
   /** Kingdom stockpile, so missing wood/stone can be shown in red. */
-  private stock = { wood: 0, stone: 0 };
+  private stock = { wood: 0, stone: 0, food: 0 };
 
   constructor(readonly def: PlotDef) {
     this.canvas.width = this.canvas.height = PX;
@@ -86,14 +86,18 @@ export class Plot {
   get stoneCost() {
     return this.def.stone?.[this.level] ?? 0;
   }
+  get foodCost() {
+    return this.def.food?.[this.level] ?? 0;
+  }
   /** Whether the kingdom stockpile covers this level's wood and stone. */
   get stocked() {
-    return this.stock.wood >= this.woodCost && this.stock.stone >= this.stoneCost;
+    return this.stock.wood >= this.woodCost && this.stock.stone >= this.stoneCost && this.stock.food >= this.foodCost;
   }
 
-  setStock(wood: number, stone: number) {
+  setStock(wood: number, stone: number, food: number) {
     this.stock.wood = wood;
     this.stock.stone = stone;
+    this.stock.food = food;
   }
 
   show(on: boolean) {
@@ -119,8 +123,8 @@ export class Plot {
   }
 
   private redraw(active: boolean) {
-    const needs = this.woodCost > 0 || this.stoneCost > 0;
-    const key = `${this.level}|${this.paid}|${active}|${needs ? `${this.stock.wood >= this.woodCost}${this.stock.stone >= this.stoneCost}` : ''}`;
+    const needs = this.woodCost > 0 || this.stoneCost > 0 || this.foodCost > 0;
+    const key = `${this.level}|${this.paid}|${active}|${needs ? `${this.stock.wood >= this.woodCost}${this.stock.stone >= this.stoneCost}${this.stock.food >= this.foodCost}` : ''}`;
     if (key === this.drawnKey) return;
     this.drawnKey = key;
     const g = this.ctx;
@@ -197,11 +201,12 @@ export class Plot {
       const items: [string, number, boolean][] = [];
       if (this.woodCost) items.push(['wood', this.woodCost, this.stock.wood >= this.woodCost]);
       if (this.stoneCost) items.push(['stone', this.stoneCost, this.stock.stone >= this.stoneCost]);
+      if (this.foodCost) items.push(['food', this.foodCost, this.stock.food >= this.foodCost]);
       g.font = 'bold 32px "Lilita One", "Trebuchet MS", sans-serif';
       const widths = items.map(([, n]) => 34 + g.measureText(String(n)).width);
       let x = W / 2 - (widths.reduce((a, b) => a + b, 0) + (items.length - 1) * 16) / 2;
       items.forEach(([kind, n, ok], i) => {
-        drawResIcon(g, kind as 'wood' | 'stone', x + 12, 218);
+        drawResIcon(g, kind as 'wood' | 'stone' | 'food', x + 12, 218);
         g.fillStyle = ok ? '#b8ff9a' : '#ff7a6b';
         g.lineWidth = 6;
         g.strokeStyle = '#2a1608';
@@ -222,12 +227,26 @@ export class Plot {
 }
 
 /** Small log / stone icons for resource costs. */
-export function drawResIcon(g: CanvasRenderingContext2D, kind: 'wood' | 'stone', x: number, y: number) {
+export function drawResIcon(g: CanvasRenderingContext2D, kind: 'wood' | 'stone' | 'food', x: number, y: number) {
   g.save();
   g.translate(x, y);
   g.lineWidth = 3;
   g.strokeStyle = '#2a1608';
-  if (kind === 'wood') {
+  if (kind === 'food') {
+    // Wheat sheaf
+    g.fillStyle = '#f0c24a';
+    for (const a of [-0.45, 0, 0.45]) {
+      g.save();
+      g.rotate(a);
+      g.beginPath();
+      g.ellipse(0, -6, 4, 8, 0, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.restore();
+    }
+    g.fillStyle = '#b8862a';
+    g.fillRect(-2, 0, 4, 12);
+  } else if (kind === 'wood') {
     g.fillStyle = '#b5773e';
     g.beginPath();
     g.ellipse(0, 0, 13, 9, -0.4, 0, Math.PI * 2);
@@ -384,15 +403,19 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       g.lineTo(40, 38);
       g.closePath();
       break;
-    case 'gate':
-      // Arched gate between two pillars
-      g.rect(-40, -34, 18, 74);
-      g.rect(22, -34, 18, 74);
-      g.moveTo(-22, 40);
-      g.lineTo(-22, -6);
-      g.quadraticCurveTo(0, -30, 22, -6);
-      g.lineTo(22, 40);
-      g.closePath();
+    case 'farm':
+      // Wheat sheaf
+      for (const a of [-0.5, -0.17, 0.17, 0.5]) {
+        g.save();
+        g.rotate(a);
+        g.moveTo(-4, 30);
+        g.lineTo(-4, -10);
+        g.quadraticCurveTo(0, -46, 4, -10);
+        g.lineTo(4, 30);
+        g.closePath();
+        g.restore();
+      }
+      g.rect(-22, 14, 44, 8);
       break;
     case 'castle':
       // Crown

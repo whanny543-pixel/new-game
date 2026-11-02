@@ -20,7 +20,7 @@ export interface Repairable {
   rebuildable: boolean;
 }
 
-type Job = 'wood' | 'stone' | 'builder' | 'villager';
+type Job = 'wood' | 'stone' | 'builder' | 'villager' | 'farmer';
 
 interface Npc {
   job: Job;
@@ -32,6 +32,7 @@ interface Npc {
   target: THREE.Vector3 | null;
   carry: THREE.Object3D | null;
   tree: Tree | null;
+  field: Field | null;
   site: Repairable | null;
   home: THREE.Vector3;
   hitT: number;
@@ -48,6 +49,28 @@ interface Tree {
   fallDir: number;
   baseScale: number;
 }
+
+interface Field {
+  pos: THREE.Vector3;
+  crops: THREE.InstancedMesh;
+  grown: number;
+  claimed: Npc | null;
+}
+
+/** Houses that appear around the castle as the kingdom grows: [model, x, z, size, castle level]. */
+export const HOUSES: [string, number, number, number, number][] = [
+  ['tent', -7, 22, 2.4, 0],
+  ['building_home_A_blue', -9.5, 22.5, 3.6, 1],
+  ['building_home_B_blue', 3.5, 22.5, 3.6, 1],
+  ['building_well_blue', -3, 23.5, 2.4, 2],
+  ['building_home_A_blue', 9.5, 21.5, 3.6, 2],
+  ['building_windmill_blue', 16.5, 19, 5.5, 3],
+  ['building_home_B_blue', -15.5, 19.5, 3.6, 3],
+  ['building_home_A_blue', -4, 28, 3.6, 4],
+  ['building_church_blue', 4, 28.5, 5.6, 4],
+  ['building_home_B_blue', 12, 26.5, 3.6, 5],
+  ['building_home_A_blue', -12, 27, 3.6, 5],
+];
 
 interface Site {
   root: THREE.Group;
@@ -67,6 +90,12 @@ export interface KingdomEvents {
 export class Kingdom {
   wood = 0;
   stone = 0;
+  food = WORKERS.startFood;
+  farm: Site | null = null;
+  private fields: Field[] = [];
+  private houses: THREE.Object3D[] = [];
+  /** Things that rise out of the ground when built. */
+  private risers: { obj: THREE.Object3D; t: number }[] = [];
   castleLevel = 0; // index into CASTLE_LEVELS
   private npcs: Npc[] = [];
   private trees: Tree[] = [];
@@ -84,16 +113,13 @@ export class Kingdom {
     private hallPos = new THREE.Vector3(0, 0, 0),
   ) {
     this.waypoints = [
-      [0, 6],
-      [4.5, 15.5],
-      [-7, 16],
-      [-3, 19],
-      [8, 18],
-      [-12, 13],
-      [13, 13],
+      [0, 7],
       [-5, 9],
       [2.5, 10],
+      [-3, 21.5],
+      [6, 20],
     ].map(([x, z]) => new THREE.Vector3(x, 0, z));
+    this.syncHouses();
     this.syncPopulation();
   }
 
@@ -148,7 +174,58 @@ export class Kingdom {
 
   setCastleLevel(level: number) {
     this.castleLevel = level;
+    this.syncHouses();
     this.syncPopulation();
+  }
+
+  /** New homes pop up as the castle levels up; townsfolk stroll between them. */
+  private syncHouses() {
+    HOUSES.forEach(([name, x, z, size, lvl], i) => {
+      if (lvl > this.castleLevel || this.houses[i]) return;
+      const h = S.prop(name, size, 'max');
+      h.position.set(x, 0, z);
+      h.rotation.y = Math.atan2(-x, -(z - 2.5)) + Math.PI;
+      this.root.add(h);
+      this.houses[i] = h;
+      this.risers.push({ obj: h, t: 0 });
+      this.waypoints.push(new THREE.Vector3(x + (x > 0 ? -2 : 2), 0, z - 2.4));
+      this.fx.p.build(new THREE.Vector3(x, 0.5, z));
+    });
+  }
+
+  buildFarm(pos: THREE.Vector3, level: number) {
+    if (!this.farm) {
+      const root = new THREE.Group();
+      const mill = S.prop('building_windmill_blue', 5.2, 'max');
+      mill.rotation.y = Math.PI;
+      root.add(mill);
+      root.position.copy(pos);
+      this.root.add(root);
+      this.farm = { root, pos: pos.clone(), level, drop: pos.clone().add(new THREE.Vector3(2.2, 0, 2.4)), pile: [] };
+      // Wheat fields beside the windmill.
+      const stalk = new THREE.ConeGeometry(0.07, 0.75, 4).translate(0, 0.37, 0);
+      const wheat = new THREE.MeshStandardMaterial({ color: 0xe8c24a, roughness: 0.8 });
+      const dirt = new THREE.MeshStandardMaterial({ color: 0x8a5a33, roughness: 1 });
+      for (const [dx, dz] of [
+        [-4.5, -2],
+        [-4.5, 2.2],
+        [4.6, -2.4],
+        [-0.5, 5],
+      ]) {
+        const fp = pos.clone().add(new THREE.Vector3(dx, 0, dz));
+        const bed = new THREE.Mesh(new THREE.BoxGeometry(3, 0.12, 3), dirt);
+        bed.position.copy(fp).setY(0.06);
+        bed.receiveShadow = true;
+        this.root.add(bed);
+        const crops = new THREE.InstancedMesh(stalk, wheat, 36);
+        crops.castShadow = true;
+        this.root.add(crops);
+        this.fields.push({ pos: fp, crops, grown: 1, claimed: null });
+      }
+    }
+    this.farm.level = level;
+    this.syncPopulation();
+    this.refreshPiles();
   }
 
   /** Choppable trees around the lumber camp; they fall when cut and grow back. */
@@ -192,12 +269,14 @@ export class Kingdom {
     };
     fill(this.camp, 'resource_lumber', this.wood, 6, 1.1);
     fill(this.quarry, 'resource_stone', this.stone, 6, 0.9);
+    fill(this.farm, 'sack', this.food, 6, 0.8);
   }
 
   /** Spends from the stockpile; the goods fly from their pile to `to`. */
-  spend(wood: number, stone: number, to: THREE.Vector3) {
+  spend(wood: number, stone: number, to: THREE.Vector3, food = 0) {
     this.wood -= wood;
     this.stone -= stone;
+    this.food -= food;
     const fly = (from: THREE.Vector3 | undefined, n: number, color: number) => {
       if (!from || !n) return;
       for (let i = 0; i < Math.min(8, n); i++) {
@@ -207,6 +286,7 @@ export class Kingdom {
     };
     fly(this.camp?.drop, wood, 0xd9a066);
     fly(this.quarry?.drop, stone, 0xd8d4cc);
+    fly(this.farm?.drop, food, 0xf0c24a);
     this.refreshPiles();
   }
 
@@ -222,6 +302,7 @@ export class Kingdom {
       stone: this.quarry ? WORKERS.perLevel[Math.min(this.quarry.level, 2)] : 0,
       builder: CASTLE_LEVELS[this.castleLevel].builders,
       villager: CASTLE_LEVELS[this.castleLevel].villagers,
+      farmer: this.farm ? WORKERS.perLevel[Math.min(this.farm.level, 2)] : 0,
     };
     for (const job of Object.keys(want) as Job[]) {
       while (this.count(job) < want[job]) this.spawn(job);
@@ -235,7 +316,9 @@ export class Kingdom {
         ? this.camp.drop.clone()
         : job === 'stone' && this.quarry
           ? this.quarry.drop.clone()
-          : this.hallPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, 4.5));
+          : job === 'farmer' && this.farm
+            ? this.farm.drop.clone()
+            : this.hallPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, 4.5));
     char.root.position.copy(start);
     if (job !== 'wood') {
       // Only woodcutters carry axes.
@@ -249,7 +332,7 @@ export class Kingdom {
     }
     this.root.add(char.root);
     const home = start.clone();
-    this.npcs.push({ job, char, pos: start, facing: 0, state: 'idle', t: Math.random() * 2, target: null, carry: null, tree: null, site: null, home, hitT: 0, side: Math.random() < 0.5 ? -1 : 1 });
+    this.npcs.push({ job, char, pos: start, facing: 0, state: 'idle', t: Math.random() * 2, target: null, carry: null, tree: null, field: null, site: null, home, hitT: 0, side: Math.random() < 0.5 ? -1 : 1 });
     this.fx.p.levelUp(start.clone().setY(0.3));
   }
 
@@ -258,6 +341,27 @@ export class Kingdom {
   update(dt: number, repairables: Repairable[], now: number) {
     this.time += dt;
     for (const tree of this.trees) this.updateTree(tree, dt);
+    for (let i = this.risers.length - 1; i >= 0; i--) {
+      const r = this.risers[i];
+      r.t = Math.min(1, r.t + dt * 2.2);
+      const k = r.t < 1 ? 1 + Math.sin(r.t * Math.PI) * 0.15 : 1;
+      r.obj.scale.y = r.obj.scale.x * Math.max(0.01, r.t) * k;
+      if (r.t >= 1) {
+        r.obj.scale.y = r.obj.scale.x;
+        this.risers.splice(i, 1);
+      }
+    }
+    const fm = new THREE.Matrix4();
+    for (const f of this.fields) {
+      if (f.grown < 1) f.grown = Math.min(1, f.grown + dt / 16);
+      // Stalks grow back taller over time.
+      const s = 0.15 + f.grown * 0.85;
+      for (let i = 0; i < 36; i++) {
+        fm.makeScale(1, s, 1).setPosition(f.pos.x - 1.25 + (i % 6) * 0.5, 0.1, f.pos.z - 1.25 + Math.floor(i / 6) * 0.5);
+        f.crops.setMatrixAt(i, fm);
+      }
+      f.crops.instanceMatrix.needsUpdate = true;
+    }
     for (const n of this.npcs) {
       switch (n.job) {
         case 'wood':
@@ -271,6 +375,9 @@ export class Kingdom {
           break;
         case 'villager':
           this.villager(n, dt);
+          break;
+        case 'farmer':
+          this.farmer(n, dt);
           break;
       }
       n.char.root.position.copy(n.pos);
@@ -320,12 +427,13 @@ export class Kingdom {
     n.carry = c;
   }
 
-  private deposit(n: Npc, kind: 'wood' | 'stone', amount: number) {
+  private deposit(n: Npc, kind: 'wood' | 'stone' | 'food', amount: number) {
     if (kind === 'wood') this.wood += amount;
-    else this.stone += amount;
+    else if (kind === 'stone') this.stone += amount;
+    else this.food += amount;
     this.setCarry(n, null);
-    this.ev.text(n.pos.clone().setY(2.4), `+${amount} ${kind}`, kind === 'wood' ? 'wood' : 'stone');
-    this.fx.p.sparkle(n.pos.clone().setY(1), kind === 'wood' ? 0xd9a066 : 0xe8e4dc, 4);
+    this.ev.text(n.pos.clone().setY(2.4), `+${amount} ${kind}`, kind === 'stone' ? 'stone' : 'wood');
+    this.fx.p.sparkle(n.pos.clone().setY(1), kind === 'wood' ? 0xd9a066 : kind === 'food' ? 0xf0c24a : 0xe8e4dc, 4);
     this.sfx.pay(0.5);
     this.refreshPiles();
   }
@@ -472,6 +580,56 @@ export class Kingdom {
     }
   }
 
+  private farmer(n: Npc, dt: number) {
+    const farm = this.farm!;
+    switch (n.state) {
+      case 'idle': {
+        n.t -= dt;
+        n.char.loop('Idle');
+        if (n.t > 0) break;
+        const field = this.fields.find((f) => f.grown >= 1 && !f.claimed);
+        if (!field) {
+          n.t = 1.5;
+          break;
+        }
+        field.claimed = n;
+        n.field = field;
+        n.target = field.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.5, 0, 1.8));
+        n.state = 'toField';
+        break;
+      }
+      case 'toField':
+        if (this.walk(n, n.target!, dt)) {
+          n.state = 'harvest';
+          n.t = WORKERS.harvestTime;
+        }
+        break;
+      case 'harvest': {
+        const f = n.field!;
+        this.face(n, f.pos, dt);
+        n.char.loop('Interact');
+        n.t -= dt;
+        if (Math.random() < dt * 6) this.fx.p.emit({ pos: f.pos.clone().setY(0.6), count: 2, color: [0xf0c24a, 0xfff0a0], spread: 1.2, speed: 1.5, up: 2, size: 0.18, life: 0.6, gravity: 6, glow: false });
+        if (n.t <= 0) {
+          f.grown = 0;
+          f.claimed = null;
+          n.field = null;
+          this.setCarry(n, 'sack', 0.7);
+          n.state = 'toMill';
+          n.target = farm.drop.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0, 0.8));
+        }
+        break;
+      }
+      case 'toMill':
+        if (this.walk(n, n.target!, dt, WORKERS.speed * 0.85)) {
+          this.deposit(n, 'food', WORKERS.foodPerTrip);
+          n.state = 'idle';
+          n.t = 0.6;
+        }
+        break;
+    }
+  }
+
   private builder(n: Npc, dt: number, sites: Repairable[], now: number) {
     switch (n.state) {
       case 'idle': {
@@ -569,6 +727,7 @@ export class Kingdom {
   dispose() {
     for (const n of this.npcs) this.root.remove(n.char.root);
     for (const t of this.trees) this.root.remove(t.obj);
+    for (const h of this.houses) if (h) this.root.remove(h);
     this.npcs = [];
     this.trees = [];
   }

@@ -1,30 +1,31 @@
 # Hearthguard
 
-A portrait, one-thumb medieval road-defense game for iOS and Android.
+A portrait, one-thumb medieval kingdom-defense game for iOS and Android.
 
-Skeleton hordes march down winding roads toward your castle. Your hero shoots on their own, and gold from fallen goblins stacks up on their back. Spend it by standing on build plots.
+You are the king. Goblin warbands march down winding roads toward your castle. You fight on the front line (your sword fires golden bolts), and gold from fallen goblins stacks up on your back. Spend it by standing on build plots.
 
-**The defense loop**
-- **Watchtowers** sit beside the road. They're empty when built: recruit archers at the **Archery Range** and lead them to a free tower. Upgrades add a second archer slot, then a ballista.
-- **Guard posts** hold the road itself. Recruit knights at the **Barracks** and lead them to a post, where they block and fight the horde.
-- **Barricades** stall the horde until they're smashed (rebuild them for gold).
-- The **Forge** makes swords and the **Bowyer** makes bows. Both stack up on a rack. Pick them up and walk past your knights and archers to hand them over. Upgrading a workshop makes better weapons: Iron → Steel → Gold.
-- A second road opens at wave 7, and a troll boss arrives every 4th wave. Trolls drop treasure chests.
-- **Hero levels:** every kill gives XP. Each level offers three perk cards (Volley, Fire Arrows, Storm Bolts, Keen Eye, War Banner, Golden Touch and more).
-- **Combos:** chain kills quickly for streak bonuses. Coins are worth more as the waves climb.
-- **Arcane Nova:** an ability button that charges from kills and blasts the horde back.
+**Campaign**
+- A world map of four kingdoms (Greenvale, Amberwood, Ashmoor, Frostpeak). Each has its own roads, look and difficulty. Survive all its waves to free it and unlock the next.
+- Victories and survived waves earn **crowns**. Spend them in the **King's Armory** on permanent upgrades: Royal Sword, Royal Armour, Swift Boots, War Banner, Treasury and Scepter.
 
-**The kingdom**
-- **Lumber Camp:** woodcutters walk to the trees, chop them down (they regrow) and haul logs back. **Quarry:** miners go into the mine and come out with stone. Wood and stone go into a shared stockpile shown in the HUD.
-- **Gatehouses** on each road: Wooden Gate → Stone Gate → Castle Gate (with archer posts on the wall). Wall wings extend to either side. Bigger upgrades cost wood and stone as well as gold.
-- **Builders** walk out to repair damaged gates and barricades between attacks, and rebuild fallen gates from the rubble.
-- **Castle upgrades** (Keep → Castle → Stronghold → Citadel) add health, builders and townsfolk, and unlock better gates. Townsfolk wander the village, chat and sit around.
+**Defense**
+- **Watchtowers** beside the road need archers. Recruit them at the **Archery Range** and lead them to a free tower. Upgrades add a slot, then a catapult.
+- **Guard posts** on the road hold knights recruited at the **Barracks**. **Barricades** stall the horde.
+- The **Forge** makes swords and the **Bowyer** makes crossbows. Carry them to your troops for better weapons.
+- An Orc Warlord leads every 4th wave and drops a treasure chest.
 
-A dotted trail always points to the most useful next step, and a hint line at the bottom explains it.
+**The kingdom grows with the castle**
+- The castle starts as a few logs, a tent and a campfire, then becomes a Wooden Hall, Timber Fort, Stone Keep, Castle and finally a Citadel.
+- The town wall grows with it: none, scattered stakes, a wooden palisade, a stone wall, castle walls, then citadel walls with towers. Gates on each road upgrade with the wall, and castle-tier gates have archer posts.
+- New houses, a well, a windmill and a church appear as the town grows, and more townsfolk move in.
+- **Lumber Camp:** woodcutters chop trees, which regrow. **Quarry:** miners bring stone. **Farm:** farmers harvest wheat for **food**, which recruits need.
+- **Builders** repair gates and barricades, and rebuild fallen gates from rubble.
+
+**The king's powers:** every kill gives XP, and each level offers three perk cards. Kills also charge the **Arcane Nova** button, which blasts the horde back.
 
 Built with Three.js and TypeScript (Vite), and packaged for the app stores with Capacitor.
 
-**Art:** 3D models are from the KayKit packs by Kay Lousberg (www.kaylousberg.com), released under CC0, so they're free for commercial use with no attribution required (credited on the title screen anyway). The packs used are Character Pack: Adventurers, Character Pack: Skeletons, Medieval Hexagon Pack and Dungeon Remastered. Sound effects are synthesized in code.
+**Art:** 3D models are from the KayKit packs by Kay Lousberg (www.kaylousberg.com), released under CC0, so they're free for commercial use with no attribution required (credited on the title screen anyway). The goblins are KayKit adventurer models re-skinned green with pointy ears added in code, and the king is the knight model with a procedural crown and royal cape. Sound effects are synthesized in code.
 
 ## Run in a browser
 
@@ -70,13 +71,13 @@ The script keeps only the animations the game uses, bundles all static models in
 | `src/run.ts` | Gameplay: hero, horde, defenders, workshops, waves, economy, hints |
 | `src/road.ts` | Road curves the horde walks along |
 | `src/assets.ts` | Loads the KayKit models; animated character rigs |
-| `src/horde.ts` | Bakes skeleton animations into instanced poses so hundreds of enemies stay cheap |
+| `src/horde.ts` | Goblin re-skin and baked instanced animations so hundreds of enemies stay cheap |
 | `src/structures.ts` | Towers, castle, workshops, hero and troops built from the models |
 | `src/models.ts` | Shared materials, small procedural bits (coins, particles, lanterns) |
 | `src/world.ts` | Meadow terrain, roads, scenery (merged into chunks), lighting |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
 | `src/perks.ts` | Level-up perk deck |
-| `src/kingdom.ts` | Wood/stone stockpile, woodcutters, miners, builders and townsfolk |
+| `src/kingdom.ts` | Wood/stone/food stockpile, woodcutters, miners, farmers, builders, townsfolk, houses |
 | `src/render.ts` | Post-processing: bloom, colour grade, vignette, adaptive quality |
 | `src/materials.ts` | PBR materials with world-space detail texture, baked environment light |
 | `src/particles.ts` | GPU point-sprite particles and effect presets |

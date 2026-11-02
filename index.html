@@ -36,6 +36,7 @@
           <div class="xp-bar"><i id="xp-fill"></i></div>
           <span class="pill res"><i class="res-ico wood"></i><span id="wood">0</span></span>
           <span class="pill res"><i class="res-ico stone"></i><span id="stone">0</span></span>
+          <span class="pill res"><i class="res-ico food"></i><span id="food">0</span></span>
         </div>
         <button id="btn-nova" aria-label="Arcane Nova">
           <span id="nova-fill"></span>
@@ -64,18 +65,63 @@
             <svg viewBox="0 0 64 72"><path d="M32 2 60 12v22c0 18-12 30-28 36C16 64 4 52 4 34V12z" fill="#2f6fd6" stroke="#ffd34d" stroke-width="4"/><path d="M20 44V26h4v4h4v-4h8v4h4v-4h4v18H36v-6a4 4 0 0 0-8 0v6z" fill="#fff4d6"/></svg>
           </div>
           <h1>Hearthguard</h1>
-          <p class="sub">Hold the Road</p>
+          <p class="sub">A King's Defense</p>
           <ul class="tips">
-            <li><b>Drag</b> anywhere to move. Your hero shoots automatically</li>
+            <li><b>Drag</b> anywhere to move. Your king fights automatically</li>
             <li><b>Stand on a plot</b> to spend gold on towers, posts and workshops</li>
             <li><b>Recruit</b> archers and knights, then lead them to their posts</li>
             <li><b>Carry</b> new swords and crossbows from the Forge and Bowyer to your troops</li>
-            <li><b>Grow your kingdom:</b> woodcutters and miners gather wood and stone for gates and castle upgrades</li>
+            <li><b>Grow your kingdom:</b> upgrade the castle from a log camp to a citadel; walls, gates and houses grow with it</li>
             <li><b>Level up</b> and pick powers, then unleash <b>Nova</b> when it's charged</li>
           </ul>
           <button id="btn-play" class="cta">Play</button>
           <p class="best" id="best"></p>
           <p class="credit">3D art: KayKit by Kay Lousberg (CC0)</p>
+        </div>
+      </div>
+
+      <div id="victory" class="overlay hidden">
+        <div class="card">
+          <div class="crest">
+            <svg viewBox="0 0 64 48"><path d="M4 40V10l14 14L32 4l14 20 14-14v30z" fill="#ffc928" stroke="#5a3a00" stroke-width="3" stroke-linejoin="round"/><circle cx="32" cy="30" r="5" fill="#e2343b"/></svg>
+          </div>
+          <h2 id="victory-title">Victory!</h2>
+          <p class="big" id="victory-text"></p>
+          <button id="btn-victory-map" class="cta">To the world map</button>
+        </div>
+      </div>
+
+      <div id="worldmap" class="overlay hidden">
+        <div class="map-wrap">
+          <div class="map-head">
+            <h2>The Realm</h2>
+            <span class="pill crowns">👑 <span id="map-crowns">0</span></span>
+          </div>
+          <div class="map-board">
+            <svg class="map-art" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="parch" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3e2bb"/><stop offset="1" stop-color="#e2c993"/></linearGradient>
+              </defs>
+              <rect width="100" height="100" fill="url(#parch)"/>
+              <path d="M0 88 Q20 80 30 90 T60 86 T100 92 V100 H0z" fill="#b9d7e8" opacity="0.7"/>
+              <path d="M60 0 L70 14 L78 6 L88 22 L96 10 L100 16 V0z" fill="#c9c2b4"/>
+              <path d="M66 6 l3 4 h-6z M84 12 l3 5 h-6z" fill="#fff"/>
+              <g fill="#7fae5a" opacity="0.8"><circle cx="12" cy="60" r="3"/><circle cx="16" cy="64" r="2.4"/><circle cx="35" cy="66" r="2.6"/><circle cx="56" cy="44" r="2.4"/><circle cx="60" cy="48" r="2.8"/></g>
+              <path d="M22 74 C34 70 40 62 48 56 S64 44 70 38 S78 24 82 16" stroke="#7a5a3a" stroke-width="0.8" stroke-dasharray="1.6 1.4" fill="none"/>
+            </svg>
+            <div id="map-nodes"></div>
+          </div>
+          <div id="map-card" class="card"></div>
+          <button id="btn-armory" class="cta ghost">⚔ King's Armory</button>
+        </div>
+      </div>
+
+      <div id="armory" class="overlay hidden">
+        <div class="card armory">
+          <h2>King's Armory</h2>
+          <p class="sub">Crowns: 👑 <span id="armory-crowns">0</span></p>
+          <div id="armory-list"></div>
+          <button id="btn-armory-close" class="cta">Done</button>
         </div>
       </div>
 
@@ -98,10 +144,11 @@
 
       <div id="over" class="overlay hidden">
         <div class="card">
-          <h2>The Hall has fallen</h2>
+          <h2>The castle has fallen</h2>
           <p class="big" id="over-wave"></p>
           <p class="best" id="over-best"></p>
-          <button id="btn-again" class="cta">Play again</button>
+          <button id="btn-again" class="cta">Try again</button>
+          <button id="btn-to-map" class="cta ghost">World map</button>
         </div>
       </div>
     </div>

@@ -12,12 +12,24 @@ import { Assets } from './assets';
 import { Horde } from './horde';
 import { useAssets } from './structures';
 import { World } from './world';
+import { CROWNS, GEAR, GEAR_COSTS, KINGDOMS, type GearId } from './config';
+import type { Assets as AssetsT } from './assets';
 import './style.css';
 
-type State = 'menu' | 'playing' | 'paused' | 'levelup' | 'over';
+type State = 'menu' | 'map' | 'playing' | 'paused' | 'levelup' | 'over';
 
-const BEST_KEY = 'hearthguard.bestWave';
+const SAVE_KEY = 'hearthguard.campaign.v1';
 const MUTE_KEY = 'hearthguard.muted';
+
+/** Campaign progress kept between sessions. */
+interface Save {
+  crowns: number;
+  /** Highest kingdom index the player may enter. */
+  unlocked: number;
+  best: Record<string, number>;
+  won: Record<string, boolean>;
+  gear: Partial<Record<GearId, number>>;
+}
 
 function load(key: string) {
   try {
@@ -52,8 +64,23 @@ class Game {
   private clock = new THREE.Clock();
   private w = 1;
   private h = 1;
-  private best = Number(load(BEST_KEY) ?? 0) || 0;
   private menuT = 0;
+  private assets: AssetsT | null = null;
+  private kingdomIndex = 0;
+  private save: Save = this.loadSave();
+
+  private loadSave(): Save {
+    const blank: Save = { crowns: 0, unlocked: 0, best: {}, won: {}, gear: {} };
+    try {
+      return { ...blank, ...JSON.parse(load(SAVE_KEY) ?? '{}') };
+    } catch {
+      return blank;
+    }
+  }
+
+  private persist() {
+    save(SAVE_KEY, JSON.stringify(this.save));
+  }
 
   constructor() {
     const mobile = matchMedia('(pointer: coarse)').matches;
@@ -79,9 +106,9 @@ class Game {
     Assets.load((f) => (play.textContent = `Loading… ${Math.round(f * 100)}%`))
       .then((assets) => {
         useAssets(assets);
+        this.assets = assets;
         this.horde = new Horde(assets, this.scene, MAX_ENEMIES);
         this.newRun();
-        this.world.decorate(this.scene, this.run!.reservedSpots(), assets);
         play.disabled = false;
         play.textContent = 'Play';
       })
@@ -106,14 +133,17 @@ class Game {
         this.sfx.unlock();
         fn();
       });
-    on('btn-play', () => this.start());
-    on('btn-again', () => this.start());
+    on('btn-play', () => this.showMap());
+    on('btn-again', () => this.start(this.kingdomIndex));
+    on('btn-to-map', () => this.showMap());
+    on('btn-victory-map', () => this.showMap());
+    on('btn-armory', () => this.showArmory());
+    on('btn-armory-close', () => document.getElementById('armory')!.classList.add('hidden'));
     on('btn-pause', () => this.pause());
     on('btn-resume', () => this.resume());
     on('btn-quit', () => {
       document.getElementById('paused')!.classList.add('hidden');
-      this.showMenu();
-      this.newRun();
+      this.showMap();
     });
     on('btn-mute', () => this.setMuted(!this.sfx.muted));
     on('btn-nova', () => {
@@ -145,28 +175,111 @@ class Game {
     this.input.release();
     this.hud.show(false);
     document.getElementById('menu')!.classList.remove('hidden');
-    document.getElementById('best')!.textContent = this.best ? `Best: Wave ${this.best}` : '';
+    document.getElementById('best')!.textContent = this.save.crowns ? `Crowns: ${this.save.crowns}` : '';
   }
 
-  private newRun() {
+  // ---------------------------------------------------------------- campaign screens
+
+  /** World map: pick a kingdom to defend. */
+  private showMap() {
+    this.state = 'map';
+    this.input.enabled = false;
+    this.input.release();
+    this.hud.show(false);
+    for (const id of ['menu', 'over', 'victory', 'paused']) document.getElementById(id)!.classList.add('hidden');
+    document.getElementById('worldmap')!.classList.remove('hidden');
+    document.getElementById('map-crowns')!.textContent = String(this.save.crowns);
+    const nodes = document.getElementById('map-nodes')!;
+    nodes.innerHTML = '';
+    KINGDOMS.forEach((k, i) => {
+      const locked = i > this.save.unlocked;
+      const won = this.save.won[k.id];
+      const b = document.createElement('button');
+      b.className = `map-node${locked ? ' locked' : ''}${won ? ' won' : ''}${i === this.save.unlocked && !won ? ' next' : ''}`;
+      b.style.left = `${k.mapX}%`;
+      b.style.top = `${k.mapY}%`;
+      b.innerHTML = `<span class="pin">${locked ? '🔒' : won ? '★' : i + 1}</span><span class="name">${k.name}</span>`;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.sfx.unlock();
+        if (locked) return;
+        this.selectKingdom(i);
+      });
+      nodes.appendChild(b);
+    });
+    this.selectKingdom(Math.min(this.save.unlocked, KINGDOMS.length - 1));
+  }
+
+  private selectKingdom(i: number) {
+    this.kingdomIndex = i;
+    const k = KINGDOMS[i];
+    const card = document.getElementById('map-card')!;
+    const best = this.save.best[k.id];
+    card.innerHTML = `
+      <h3>${k.name}</h3>
+      <p>${k.blurb}</p>
+      <p class="facts">Survive <b>${k.waves}</b> waves · Goblin strength <b>×${k.hpMul.toFixed(2)}</b>${best ? ` · Best: wave ${best}` : ''}${this.save.won[k.id] ? ' · <b>Conquered</b>' : ''}</p>
+      <button id="btn-defend" class="cta">Defend ${k.name}</button>`;
+    document.querySelectorAll('.map-node').forEach((n, j) => n.classList.toggle('selected', j === i));
+    document.getElementById('btn-defend')!.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.sfx.unlock();
+      this.start(i);
+    });
+  }
+
+  /** The king's armory: spend crowns on permanent upgrades. */
+  private showArmory() {
+    document.getElementById('armory')!.classList.remove('hidden');
+    document.getElementById('armory-crowns')!.textContent = String(this.save.crowns);
+    const list = document.getElementById('armory-list')!;
+    list.innerHTML = '';
+    for (const g of GEAR) {
+      const lvl = this.save.gear[g.id] ?? 0;
+      const maxed = lvl >= g.max;
+      const cost = GEAR_COSTS[lvl];
+      const row = document.createElement('div');
+      row.className = 'gear';
+      row.innerHTML = `
+        <div class="gear-info"><b>${g.name}</b> <span class="gear-lvl">${'◆'.repeat(lvl)}${'◇'.repeat(g.max - lvl)}</span><small>${g.desc} per level</small></div>
+        <button class="gear-buy" ${maxed || this.save.crowns < cost ? 'disabled' : ''}>${maxed ? 'Max' : `👑 ${cost}`}</button>`;
+      row.querySelector('button')!.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (maxed || this.save.crowns < cost) return;
+        this.save.crowns -= cost;
+        this.save.gear[g.id] = lvl + 1;
+        this.persist();
+        this.sfx.levelUp();
+        this.showArmory();
+        document.getElementById('map-crowns')!.textContent = String(this.save.crowns);
+      });
+      list.appendChild(row);
+    }
+  }
+
+  private newRun(kingdom = this.kingdomIndex) {
     this.run?.dispose();
     this.hud.reset();
     this.fx.clear();
+    const map = KINGDOMS[kingdom];
+    this.world.setMap(map);
     this.run = new Run(this.scene, this.world, this.fx, this.sfx, this.hud, {
       onGameOver: (wave) => this.gameOver(wave),
+      onVictory: () => this.victory(),
       haptic: (strong) => {
         Haptics.impact({ style: strong ? ImpactStyle.Heavy : ImpactStyle.Light }).catch(() => {});
       },
       hurt: (a) => (this.renderer.hurt = Math.max(this.renderer.hurt, a)),
       flash: (a) => (this.renderer.flash = Math.max(this.renderer.flash, a)),
-    }, this.horde!);
+    }, this.horde!, map, this.save.gear);
+    this.world.decorate(this.run.reservedSpots(), this.assets!);
     this.camFocus.copy(this.run.heroPos);
   }
 
-  private start() {
-    document.getElementById('menu')!.classList.add('hidden');
-    document.getElementById('over')!.classList.add('hidden');
-    this.newRun();
+  private start(kingdom = this.kingdomIndex) {
+    this.kingdomIndex = kingdom;
+    for (const id of ['menu', 'over', 'victory', 'worldmap']) document.getElementById(id)!.classList.add('hidden');
+    this.newRun(kingdom);
     this.state = 'playing';
     this.input.enabled = true;
     this.hud.show(true);
@@ -188,21 +301,45 @@ class Game {
     this.clock.getDelta();
   }
 
+  /** Crowns for the waves this run survived (paid on defeat and on victory). */
+  private payCrowns(waves: number) {
+    const earned = Math.max(0, waves) * CROWNS.perWave(this.kingdomIndex);
+    this.save.crowns += earned;
+    const id = KINGDOMS[this.kingdomIndex].id;
+    this.save.best[id] = Math.max(this.save.best[id] ?? 0, waves);
+    return earned;
+  }
+
   private gameOver(wave: number) {
     // Let the explosion play for a moment before the card appears.
     setTimeout(() => {
       this.state = 'over';
       this.input.enabled = false;
       this.input.release();
-      const record = wave > this.best;
-      if (record) {
-        this.best = wave;
-        save(BEST_KEY, String(wave));
-      }
-      document.getElementById('over-wave')!.textContent = `You held until wave ${wave}`;
-      document.getElementById('over-best')!.textContent = record ? 'New best!' : `Best: Wave ${this.best}`;
+      const earned = this.payCrowns(wave - 1);
+      this.persist();
+      document.getElementById('over-wave')!.textContent = `You held ${KINGDOMS[this.kingdomIndex].name} until wave ${wave}`;
+      document.getElementById('over-best')!.textContent = `+${earned} crowns · spend them in the Armory`;
       document.getElementById('over')!.classList.remove('hidden');
     }, 1200);
+  }
+
+  private victory() {
+    setTimeout(() => {
+      this.state = 'over';
+      this.input.enabled = false;
+      this.input.release();
+      const k = KINGDOMS[this.kingdomIndex];
+      const earned = this.payCrowns(k.waves) + CROWNS.victory(this.kingdomIndex);
+      this.save.crowns += CROWNS.victory(this.kingdomIndex);
+      this.save.won[k.id] = true;
+      this.save.unlocked = Math.max(this.save.unlocked, Math.min(KINGDOMS.length - 1, this.kingdomIndex + 1));
+      this.persist();
+      const next = KINGDOMS[this.kingdomIndex + 1];
+      document.getElementById('victory-title')!.textContent = `${k.name} is safe!`;
+      document.getElementById('victory-text')!.textContent = `+${earned} crowns.${next ? ` ${next.name} calls for its king.` : ' Every kingdom is free. Long live the king!'}`;
+      document.getElementById('victory')!.classList.remove('hidden');
+    }, 1800);
   }
 
   private resize() {

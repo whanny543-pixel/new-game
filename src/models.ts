@@ -35,7 +35,7 @@ export const MAT = {
   shadow: new THREE.MeshBasicMaterial({ color: 0x3a1d05, transparent: true, opacity: 0.26, depthWrite: false }),
   arrowModel: new THREE.MeshStandardMaterial({ color: 0xd9b27a, roughness: 0.6 }),
   /** HDR colour so the bolts bloom. */
-  magic: new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 2.6, 3.4) }),
+  magic: new THREE.MeshBasicMaterial({ color: new THREE.Color(3.4, 2.6, 1.0) }),
   glowRing: new THREE.MeshBasicMaterial({
     color: 0xffd86b,
     transparent: true,

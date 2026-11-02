@@ -19,7 +19,10 @@ import {
   WORKSHOP,
   coinValue,
   CASTLE_LEVELS,
-  GATE_TIERS,
+  WALL_TIERS,
+  TOWN_WALL,
+  type KingdomMap,
+  type GearId,
   NOVA,
   type EnemyKind,
   type EnemyType,
@@ -29,7 +32,7 @@ import {
 import * as M from './models';
 import * as S from './structures';
 import type { Horde } from './horde';
-import { Kingdom } from './kingdom';
+import { HOUSES, Kingdom } from './kingdom';
 import { Plot } from './plot';
 import { BASE_STATS, xpForLevel, type HeroStats, type Perk } from './perks';
 import type { Fx } from './fx';
@@ -97,7 +100,7 @@ interface Unit {
 }
 
 interface Tower {
-  plot: Plot;
+  plot: Plot | null;
   pos: THREE.Vector3;
   rig: S.TowerRig;
   level: number;
@@ -119,7 +122,8 @@ interface Post {
 }
 
 interface Barricade {
-  plot: Plot;
+  id: string;
+  plot: Plot | null;
   road: number;
   s: number;
   hp: number;
@@ -196,6 +200,7 @@ interface Chest {
 
 export interface RunEvents {
   onGameOver(wave: number): void;
+  onVictory(): void;
   haptic(strong: boolean): void;
   hurt(amount: number): void;
   flash(amount: number): void;
@@ -247,13 +252,21 @@ export class Run {
   private giveT = 0;
 
   // Hall
-  hall = S.makeHall();
-  hallHp = HALL.maxHp;
-  hallMax = HALL.maxHp;
-  private hallRadius = HALL.radius;
+  /** Holds the current castle model (swapped on each upgrade). */
+  hall = { root: new THREE.Group(), model: null as THREE.Object3D | null };
+  castleLevel = 0;
+  private townWall: THREE.Object3D | null = null;
+  private wallRise = 1;
+  hallHp: number = CASTLE_LEVELS[0].hp;
+  hallMax: number = CASTLE_LEVELS[0].hp;
+  private hallRadius = CASTLE_LEVELS[0].radius;
   kingdom: Kingdom;
   /** 0..1 charge of the hero's Arcane Nova. */
   nova = 0;
+  private novaRate = 1;
+  private startBonus = 0;
+  /** Set once the last wave of this kingdom is beaten. */
+  won = false;
   private hallLastHit = -99;
 
   // Enemies
@@ -297,11 +310,23 @@ export class Run {
     private hud: Hud,
     private events: RunEvents,
     private horde: Horde,
+    readonly map: KingdomMap,
+    gear: Partial<Record<GearId, number>> = {},
   ) {
+    // The king's armory: permanent bonuses from the campaign.
+    const lv = (id: GearId) => gear[id] ?? 0;
+    this.stats.damage *= 1 + 0.12 * lv('sword');
+    this.stats.maxHp *= 1 + 0.15 * lv('armor');
+    this.stats.speed *= 1 + 0.05 * lv('boots');
+    this.stats.allies *= 1 + 0.08 * lv('banner');
+    this.novaRate = 1 + 0.12 * lv('scepter');
+    this.heroHp = this.stats.maxHp;
+    this.startBonus = 10 * lv('treasury');
     scene.add(this.root);
     world.openRoad(1, false);
 
     this.root.add(this.hall.root);
+    this.setCastleModel(0);
     this.kingdom = new Kingdom(this.root, fx, sfx, {
       text: (p, m, c) => this.fx.text(p, m, c),
       push: (p, r) => this.pushOutOfBuildings(p, r),
@@ -356,7 +381,7 @@ export class Run {
     }
 
     // A little gold on the ground teaches the collect → build loop straight away.
-    for (let i = 0; i < PLAYER.startGold; i++) this.dropCoin(v1.set(-3.25 + (i % 7) * 1.08, 0.3, 7.2 + Math.floor(i / 7) * 0.9), 0.4, 1);
+    for (let i = 0; i < PLAYER.startGold + this.startBonus; i++) this.dropCoin(v1.set(-3.25 + (i % 7) * 1.08, 0.3, 7.2 + Math.floor(i / 7) * 0.9), 0.4, 1);
   }
 
   private get roads(): Road[] {
@@ -386,11 +411,14 @@ export class Run {
       const k = p.def.kind;
       if (k === 'camp') out.push({ x: p.pos.x - 4, z: p.pos.z - 5, r: 8.5 }); // the woodcutters' forest
       if (k === 'camp' || k === 'quarry') out.push({ x: p.pos.x, z: p.pos.z, r: 5.5 });
-      if (k === 'gate') {
-        const g = this.resolve(p.def.place);
-        out.push({ x: g.x, z: g.z, r: 9 });
-      }
+      if (k === 'farm') out.push({ x: p.pos.x, z: p.pos.z + 1, r: 8 }); // windmill and wheat fields
     }
+    // Keep scenery off the town wall ring and away from the houses that appear later.
+    for (let i = 0; i < 48; i++) {
+      const th = (i / 48) * Math.PI * 2;
+      out.push({ x: TOWN_WALL.cx + Math.cos(th) * TOWN_WALL.r, z: TOWN_WALL.cz + Math.sin(th) * TOWN_WALL.r, r: 2 });
+    }
+    for (const [, x, z] of HOUSES) out.push({ x, z, r: 3.2 });
     for (const p of this.plots) {
       out.push({ x: p.pos.x, z: p.pos.z, r: 3 });
       if (p.def.kind === 'tower') {
@@ -484,7 +512,7 @@ export class Run {
     this.updatePlots(dt);
     this.updateHall(dt);
     this.kingdom.update(dt, [...this.barricades.values()], this.time);
-    this.hud.setResources(this.kingdom.wood, this.kingdom.stone);
+    this.hud.setResources(this.kingdom.wood, this.kingdom.stone, this.kingdom.food);
     this.updateGuide();
     this.updateStacks(dt);
     this.drawCrowd(dt);
@@ -558,7 +586,7 @@ export class Run {
           t = this.nearestExcept(this.heroPos.x, this.heroPos.z, PLAYER.range, hit);
         }
         this.fx.p.muzzle(v1);
-        if (!moving) rig.char.once('Spellcast_Shoot', 2.2);
+        if (!moving) rig.char.once('1H_Melee_Attack_Stab', 2.2);
         this.sfx.shoot();
       }
     }
@@ -698,24 +726,38 @@ export class Run {
       this.spawn(it.kind, it.road);
       this.waveSpawned++;
     }
+    // Beat the last wave of this kingdom to win it.
+    if (this.wave >= this.map.waves && this.queue.length === 0 && this.enemies.length === 0 && !this.won && !this.over) {
+      this.won = true;
+      this.over = true;
+      this.hud.banner(`${this.map.name} is safe!`, false);
+      this.fx.p.levelUp(v1.copy(this.heroPos).setY(0.5));
+      this.fx.pillar(this.heroPos, 0xffd34d, 2, 1.5);
+      this.hero.char.once('Cheer', 1);
+      this.events.flash(0.7);
+      this.sfx.treasure();
+      this.events.onVictory();
+      return;
+    }
+    if (this.wave >= this.map.waves) return;
     if (this.queue.length === 0 && this.time >= this.nextWaveAt) {
       const elapsed = this.time - this.waveStart;
       if (this.wave === 0 || this.enemies.length <= 6 || elapsed > WAVES.duration + 14) this.startWave(this.wave + 1);
     }
-    this.hud.setWave(Math.max(1, this.wave), this.wave === 0 ? 0 : this.waveSpawned / this.waveTotal);
+    this.hud.setWave(Math.max(1, this.wave), this.wave === 0 ? 0 : this.waveSpawned / this.waveTotal, this.map.waves);
   }
 
   private startWave(n: number) {
     this.wave = n;
     this.waveStart = this.time;
     this.nextWaveAt = this.time + WAVES.duration + WAVES.breakTime;
-    if (n >= WAVES.roadBWave && !this.roadBOpen) {
+    if (n >= this.map.roadBWave && !this.roadBOpen) {
       this.roadBOpen = true;
       this.world.openRoad(1, true);
-      this.hud.banner('Skeletons on the east road!', true);
+      this.hud.banner('Goblins on the east road!', true);
       this.sfx.boss();
     }
-    const total = WAVES.baseCount + (n - 1) * WAVES.countPerWave;
+    const total = Math.round((WAVES.baseCount + (n - 1) * WAVES.countPerWave) * this.map.countMul);
     const trolls = n % 4 === 0 ? Math.ceil(n / 4) : n >= 10 && n % 2 === 0 ? 1 : 0;
     const items: SpawnItem[] = [];
     // Enemies arrive in packs that string out along the road.
@@ -741,9 +783,9 @@ export class Run {
     this.waveTotal = items.length;
     this.waveSpawned = 0;
     if (trolls) {
-      this.hud.banner(`Wave ${n}: Bone Giant!`, true);
+      this.hud.banner(`Wave ${n}: Orc Warlord!`, true);
       this.sfx.boss();
-    } else if (!(n === WAVES.roadBWave)) {
+    } else if (!(n === this.map.roadBWave)) {
       this.hud.banner(`Wave ${n}`, false);
       this.sfx.wave();
     }
@@ -752,7 +794,7 @@ export class Run {
   private spawn(kind: EnemyKind, road: number) {
     if (this.enemies.filter((e) => e.kind === kind).length >= MAX_ENEMIES[kind]) return;
     const type = ENEMIES[kind];
-    const hp = Math.round(type.hp * (1 + WAVES.hpGrowth * (this.wave - 1)) * (type.boss ? 1 + this.wave * 0.06 : 1));
+    const hp = Math.round(type.hp * this.map.hpMul * (1 + WAVES.hpGrowth * (this.wave - 1)) * (type.boss ? 1 + this.wave * 0.06 : 1));
     const e: Enemy = {
       kind,
       type,
@@ -771,7 +813,7 @@ export class Run {
       phase: Math.random() * 10,
       moving: true,
       bar: type.boss ? this.hud.worldBar('enemy big') : null,
-      spawnT: this.horde.duration(kind, 'spawn') / 1.6,
+      spawnT: 0.35,
       deadT: -1,
       animT: Math.random(),
     };
@@ -874,7 +916,7 @@ export class Run {
       }
       // 4. Reaching the hall: one heavy hit, then the goblin is gone (no reward).
       if (!blocked && e.s >= road.length - 0.3) {
-        this.damageHall(t.damage * 3);
+        this.damageHall(t.damage * 4);
         e.alive = false;
         this.fx.p.explosion(v1.set(e.x, 1, e.z));
         continue;
@@ -1004,7 +1046,7 @@ export class Run {
     for (let i = 0; i < coins; i++) this.dropCoin(v1, e.type.boss ? 4 : 1.6);
 
     // XP and level-ups.
-    this.nova = Math.min(1, this.nova + (e.type.boss ? 0.3 : 1 / NOVA.killsToCharge));
+    this.nova = Math.min(1, this.nova + (e.type.boss ? 0.3 : this.novaRate / NOVA.killsToCharge));
     this.hud.setNova(this.nova);
     this.xp += e.type.boss ? 20 : 1;
     while (this.xp >= xpForLevel(this.level)) {
@@ -1037,7 +1079,7 @@ export class Run {
       this.events.haptic(true);
       this.events.flash(0.6);
       this.fx.ring(v1, 0xffffff, 6, 0.5);
-      this.hud.banner('Giant smashed!', false);
+      this.hud.banner('Warlord slain!', false);
       this.spawnChest(v1);
     }
   }
@@ -1255,7 +1297,8 @@ export class Run {
   private needMet(r: string) {
     if (!r) return true;
     if (r.startsWith('wave:')) return this.wave >= Number(r.slice(5));
-    if (r.startsWith('castle:')) return this.kingdom.castleLevel + 1 >= Number(r.slice(7));
+    if (r.startsWith('castle:')) return this.castleLevel >= Number(r.slice(7));
+    if (r === 'roadB') return this.roadBOpen;
     return this.isBuilt(r);
   }
 
@@ -1275,7 +1318,7 @@ export class Run {
   private updatePlots(dt: number) {
     let on: Plot | null = null;
     for (const p of this.plots) {
-      p.setStock(this.kingdom.wood, this.kingdom.stone);
+      p.setStock(this.kingdom.wood, this.kingdom.stone, this.kingdom.food);
       p.show(this.plotVisible(p));
       if (!p.shown || !this.heroAlive) continue;
       const dx = this.heroPos.x - p.pos.x;
@@ -1318,7 +1361,8 @@ export class Run {
   completePlot(p: Plot) {
     const def = p.def;
     const lvl = p.level;
-    if (p.woodCost || p.stoneCost) this.kingdom.spend(Math.min(p.woodCost, this.kingdom.wood), Math.min(p.stoneCost, this.kingdom.stone), p.pos);
+    if (p.woodCost || p.stoneCost || p.foodCost)
+      this.kingdom.spend(Math.min(p.woodCost, this.kingdom.wood), Math.min(p.stoneCost, this.kingdom.stone), p.pos, Math.min(p.foodCost, this.kingdom.food));
     p.level++;
     p.paid = 0;
     this.sfx.build();
@@ -1358,15 +1402,19 @@ export class Run {
       case 'quarry':
         this.kingdom.buildQuarry(this.resolve(def.place), lvl);
         if (lvl === 0) {
-          p.setPos(-14.2, 11.4);
+          p.setPos(-22.6, 13.2);
           this.fx.text(v2.copy(p.pos).setY(4), 'Quarry! Miners at work', 'good');
         } else this.fx.text(v2.copy(p.pos).setY(4), '+1 miner', 'good');
         break;
       case 'castle':
         this.upgradeCastle(lvl + 1);
         break;
-      case 'gate':
-        this.buildGate(p, lvl);
+      case 'farm':
+        this.kingdom.buildFarm(this.resolve(def.place), lvl);
+        if (lvl === 0) {
+          p.setPos(-21, 4.6);
+          this.fx.text(v2.copy(p.pos).setY(4), 'Farm! Farmers bring food for your army', 'good');
+        } else this.fx.text(v2.copy(p.pos).setY(4), '+1 farmer', 'good');
         break;
       case 'recruitArcher':
       case 'recruitKnight': {
@@ -1444,7 +1492,7 @@ export class Run {
       mesh.rotation.y = Math.atan2(v2.x, v2.z);
       this.root.add(mesh);
       const hp = BARRICADE_HP[pl.road === 0 ? 0 : 1];
-      b = { plot: p, road: pl.road, s, hp, maxHp: hp, alive: true, mesh, pos, lastHit: -99, shake: 0, rise: 0, rebuildable: false };
+      b = { id: def.id, plot: p, road: pl.road, s, hp, maxHp: hp, alive: true, mesh, pos, lastHit: -99, shake: 0, rise: 0, rebuildable: false };
       this.barricades.set(def.id, b);
     }
     b.alive = true;
@@ -1754,7 +1802,7 @@ export class Run {
         this.fx.shake = Math.max(this.fx.shake, 0.7);
         this.events.haptic(true);
         // Archers on the wall come down with it.
-        const t = this.towers.get(b.plot.def.id + '_wall');
+        const t = this.towers.get(b.id + '_wall');
         if (t) t.rig.root.visible = false;
       }
       this.fx.burst(v1.copy(b.pos).setY(0.6), COLORS.wood, 22, 5);
@@ -1771,7 +1819,7 @@ export class Run {
         b.mesh.visible = true;
         b.rise = 0;
         b.gate.rubble.visible = false;
-        const t = this.towers.get(b.plot.def.id + '_wall');
+        const t = this.towers.get(b.id + '_wall');
         if (t) t.rig.root.visible = true;
         this.fx.p.build(v1.copy(b.pos).setY(0.5));
         this.fx.text(v1.copy(b.pos).setY(3), 'Gate rebuilt!', 'good');
@@ -1893,7 +1941,15 @@ export class Run {
 
   private updateHall(dt: number) {
     if (this.time - this.hallLastHit > 5) this.hallHp = Math.min(this.hallMax, this.hallHp + HALL.regen * dt);
-    this.hall.banners.children.forEach((b, i) => (b.rotation.y = Math.sin(this.time * 2 + i) * 0.2));
+    if (this.castleRise < 1) {
+      this.castleRise = Math.min(1, this.castleRise + dt * 2);
+      const k = this.castleRise < 1 ? 1 + Math.sin(this.castleRise * Math.PI) * 0.12 : 1;
+      this.hall.root.scale.set(1, Math.max(0.01, this.castleRise) * k, 1);
+    }
+    if (this.townWall && this.wallRise < 1) {
+      this.wallRise = Math.min(1, this.wallRise + dt * 1.6);
+      this.townWall.scale.y = Math.max(0.01, this.wallRise);
+    }
     this.hud.setKeep(this.hallHp / this.hallMax);
   }
 
@@ -1969,79 +2025,113 @@ export class Run {
     const st = Math.max(0, p.stoneCost - this.kingdom.stone);
     if (w && !this.kingdom.camp) return `Needs ${w} wood. Build a Lumber Camp`;
     if (st && !this.kingdom.quarry) return `Needs ${st} stone. Build a Quarry`;
+    const fd = Math.max(0, p.foodCost - this.kingdom.food);
+    if (fd && !this.kingdom.farm) return `Needs ${fd} food. Build a Farm`;
+    if (fd) return `Waiting for ${fd} food from your farmers`;
     return `Waiting for ${[w ? `${w} wood` : '', st ? `${st} stone` : ''].filter(Boolean).join(' and ')} from your workers`;
   }
 
-  /** Castle upgrades: more health, more builders and townsfolk, and a bigger castle. */
+  private setCastleModel(level: number) {
+    if (this.hall.model) this.hall.root.remove(this.hall.model);
+    this.hall.model = S.makeCastle(level);
+    this.hall.root.add(this.hall.model);
+  }
+
+  /**
+   * Castle upgrades grow the whole kingdom: a bigger castle, more health, more builders and townsfolk,
+   * new houses, and town walls that go from nothing → stakes → wood → stone → castle walls.
+   */
   private upgradeCastle(level: number) {
-    const L = CASTLE_LEVELS[Math.min(level, CASTLE_LEVELS.length - 1)];
-    this.kingdom.setCastleLevel(Math.min(level, CASTLE_LEVELS.length - 1));
+    level = Math.min(level, CASTLE_LEVELS.length - 1);
+    const L = CASTLE_LEVELS[level];
+    const prev = CASTLE_LEVELS[this.castleLevel];
+    this.castleLevel = level;
+    this.kingdom.setCastleLevel(level);
     const frac = this.hallHp / this.hallMax;
     this.hallMax = L.hp;
     this.hallHp = Math.min(this.hallMax, frac * this.hallMax + this.hallMax * 0.25);
-    const scale = 1 + level * 0.1;
-    this.hall.root.scale.setScalar(scale);
-    this.hallRadius = HALL.radius * scale;
-    this.hud.banner(`Your Keep is now a ${L.name}!`, false);
+    this.hallRadius = L.radius;
+    this.setCastleModel(level);
+    this.hall.root.scale.set(1, 0.01, 1);
+    this.castleRise = 0;
+    if (L.walls !== prev.walls) this.buildTownWall(L.walls);
+    this.hud.banner(`${L.name}!`, false);
     this.fx.pillar(v1.set(0, 0, 0), 0xffe08a, 5, 1.4);
-    this.fx.ring(v1, 0xffd34d, 12, 0.9);
+    this.fx.ring(v1, 0xffd34d, 14, 0.9);
     this.fx.p.levelUp(v1.set(0, 3, 0));
+    this.fx.p.build(v1.set(0, 1, 0));
+    this.fx.shake = Math.max(this.fx.shake, 0.4);
     this.events.flash(0.5);
     this.sfx.levelUp();
   }
 
-  /** Gatehouse on a road: wooden, then stone, then a castle wall with archer posts. */
-  private buildGate(p: Plot, lvl: number) {
-    const def = p.def;
-    const tier = GATE_TIERS[Math.min(lvl, GATE_TIERS.length - 1)];
-    const pl = def.place as { road: number; t: number };
-    const road = this.roads[pl.road];
-    const s = road.length * pl.t;
+  private castleRise = 1;
+
+  /** Raises the town wall ring for a tier, with gates where it crosses the roads. */
+  private buildTownWall(tierIndex: number) {
+    const tier = WALL_TIERS[tierIndex];
+    const { cx, cz, r } = TOWN_WALL;
+    const blockers: { x: number; z: number; r: number }[] = [];
+    for (const q of this.plots) if (q.shown || q.level > 0) blockers.push({ x: q.pos.x, z: q.pos.z, r: 1.6 });
+    for (const t of this.towers.values()) if (!t.plot || t.plot.def.kind === 'tower') blockers.push({ x: t.pos.x, z: t.pos.z, r: 2 });
+    for (const sh of this.shops.values()) blockers.push({ x: sh.pos.x, z: sh.pos.z, r: 3 });
+    for (const site of [this.kingdom.camp, this.kingdom.quarry, this.kingdom.farm]) if (site) blockers.push({ x: site.pos.x, z: site.pos.z, r: 3.5 });
+    const canPlace = (x: number, z: number) => {
+      if (blockers.some((b) => Math.hypot(x - b.x, z - b.z) < b.r + 1)) return false;
+      return this.roads.every((rd) => rd.distanceTo(x, z) > ROAD_HALF_WIDTH + 1.4);
+    };
+    if (this.townWall) this.root.remove(this.townWall);
+    this.townWall = S.makeTownWall(tier, tierIndex >= 5, cx, cz, r, canPlace);
+    this.root.add(this.townWall);
+    this.wallRise = 0;
+    if (tier.wall) this.hud.banner(`${tier.name} raised!`, false);
+    // Dust all the way round as the new wall goes up.
+    for (let i = 0; i < 24; i++) {
+      const th = (i / 24) * Math.PI * 2;
+      this.fx.p.dust(v1.set(cx + Math.cos(th) * r, 0.2, cz + Math.sin(th) * r), 3);
+    }
+    if (tier.gate) this.roads.forEach((_, i) => this.buildGate(i, tierIndex));
+  }
+
+  /** A gate where the town wall crosses a road; it upgrades with the wall. */
+  private buildGate(roadIndex: number, tierIndex: number) {
+    const tier = WALL_TIERS[tierIndex];
+    const road = this.roads[roadIndex];
+    const { cx, cz, r } = TOWN_WALL;
+    // Walk back from the castle end until the road leaves the wall ring.
+    let s = road.length;
+    while (s > 0 && road.point(s, 0, v1).distanceTo(v2.set(cx, 0, cz)) < r) s -= 0.25;
     const pos = road.point(s, 0, new THREE.Vector3());
     road.tangent(s, v2);
     const right = new THREE.Vector3(-v2.z, 0, v2.x);
     const span = ROAD_HALF_WIDTH * 2 + 0.8;
-    // Keep wings clear of towers, buildings, plots and the other road.
-    const blockers: { x: number; z: number; r: number }[] = [{ x: 0, z: 0, r: this.hallRadius + 1.5 }];
-    for (const q of this.plots) if (q !== p && q.def.kind !== 'gate') blockers.push({ x: q.pos.x, z: q.pos.z, r: 1.8 });
-    for (const t of this.towers.values()) blockers.push({ x: t.pos.x, z: t.pos.z, r: 2 });
-    for (const sh of this.shops.values()) blockers.push({ x: sh.pos.x, z: sh.pos.z, r: 3 });
-    const canPlace = (x: number) => {
-      const wx = pos.x + right.x * x;
-      const wz = pos.z + right.z * x;
-      if (blockers.some((b) => Math.hypot(wx - b.x, wz - b.z) < b.r + 1.2)) return false;
-      return this.roads.every((r, i) => i === pl.road || r.distanceTo(wx, wz) > ROAD_HALF_WIDTH + 1);
-    };
-    const group = S.makeGate(tier.gate, tier.wall, span, canPlace, tier.archers > 0);
+    const castle = tier.archers > 0;
+    const group = S.makeGate(tier.gate, tier.wall, span, () => false, castle);
     group.position.copy(pos);
     group.rotation.y = Math.atan2(v2.x, v2.z);
     this.root.add(group);
-
-    let b = this.barricades.get(def.id);
+    const id = `gate${roadIndex}`;
+    let b = this.barricades.get(id);
     if (!b) {
       const rubble = S.prop('building_destroyed', span * 0.8, 'max');
       rubble.position.copy(pos);
       rubble.visible = false;
       this.root.add(rubble);
-      b = { plot: p, road: pl.road, s, hp: tier.hp, maxHp: tier.hp, alive: true, mesh: group, pos, lastHit: -99, shake: 0, rise: 0, rebuildable: true, gate: { tier: lvl, rubble, right } };
-      this.barricades.set(def.id, b);
+      b = { id, plot: null, road: roadIndex, s, hp: tier.gateHp, maxHp: tier.gateHp, alive: true, mesh: group, pos, lastHit: -99, shake: 0, rise: 0, rebuildable: true, gate: { tier: tierIndex, rubble, right } };
+      this.barricades.set(id, b);
     } else {
       this.root.remove(b.mesh);
       b.mesh = group;
-      b.gate!.tier = lvl;
-      b.maxHp = tier.hp;
-      b.hp = tier.hp;
+      b.gate!.tier = tierIndex;
+      b.maxHp = tier.gateHp;
+      b.hp = tier.gateHp;
       b.alive = true;
       b.gate!.rubble.visible = false;
     }
     b.rise = 0;
     this.fx.p.build(v1.copy(pos).setY(0.5));
-    this.fx.ring(pos, 0xffe08a, 9, 0.7);
-    this.fx.text(v1.copy(pos).setY(4), `${tier.name}!`, 'good');
-    this.hud.banner(`${tier.name} raised!`, false);
-
-    // The castle gate has a walkway with archer posts.
-    if (tier.archers > 0 && !this.towers.has(def.id + '_wall')) {
+    // Castle-tier gates have a walkway with archer posts.
+    if (castle && !this.towers.has(id + '_wall')) {
       const H = 3.1;
       const rig: S.TowerRig = {
         root: group,
@@ -2050,8 +2140,12 @@ export class Run {
         base: new THREE.Group(),
         slots: [new THREE.Vector3(-1.6, H, -0.3), new THREE.Vector3(1.6, H, -0.3)],
       };
-      const t: Tower = { plot: p, pos: pos.clone(), rig, level: 1, units: [null, null], ballistaCd: 0, grow: 1, label: this.hud.worldLabel('archer') };
-      this.towers.set(def.id + '_wall', t);
+      const t: Tower = { plot: null, pos: pos.clone(), rig, level: 1, units: [null, null], ballistaCd: 0, grow: 1, label: this.hud.worldLabel('archer') };
+      this.towers.set(id + '_wall', t);
+    } else if (castle) {
+      // Re-seat the existing wall archers on the new gate model.
+      const t = this.towers.get(id + '_wall')!;
+      t.rig.root = group;
     }
   }
 
@@ -2078,7 +2172,7 @@ export class Run {
     this.hitstop = 0.12;
     this.events.flash(0.7);
     this.events.haptic(true);
-    this.hero.char.once('Spellcast_Shoot', 1.2);
+    this.hero.char.once('Cheer', 1.6);
     this.sfx.boom();
     this.sfx.levelUp();
     return true;
@@ -2087,7 +2181,7 @@ export class Run {
   private currentHint() {
     if (!this.heroAlive) return `Back in ${Math.ceil(this.respawnT)}…`;
     const built = (id: string) => this.isBuilt(id);
-    if (!built('tw1')) return this.carry < 5 ? 'Defeat skeletons and grab their gold' : 'Stand on the plot to build a watchtower';
+    if (!built('tw1')) return this.carry < 5 ? 'Defeat goblins and grab their gold' : 'Stand on the plot to build a watchtower';
     const followers = this.units.filter((u) => u.state === 'follow');
     if (followers.some((u) => u.type === 'archer') && [...this.towers.values()].some((t) => this.freeSlot(t) >= 0))
       return 'Lead your archer to an empty watchtower';
@@ -2099,7 +2193,8 @@ export class Run {
     if (built('gp1') && !built('barracks')) return 'Build Barracks to recruit knights';
     if (built('barracks') && !this.units.some((u) => u.type === 'knight')) return 'Recruit knights to hold the road';
     if (built('tw2') && !built('camp')) return 'Build a Lumber Camp: woodcutters will gather wood';
-    if (built('camp') && !built('gateA')) return 'Raise a gate across the road to shield the castle';
+    if (built('camp') && this.castleLevel === 0) return 'Upgrade your camp: the castle, walls and town grow with it';
+    if (built('range') && !built('farm') && this.kingdom.food < 4) return 'Build a Farm: recruits need food';
     if (this.nova >= 1 && this.enemies.length > 4) return 'Arcane Nova is ready! Tap the button';
     if (this.weapons.length) {
       const k = this.weapons[this.weapons.length - 1].kind;

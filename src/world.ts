@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { COLORS, ROAD_HALF_WIDTH, ROADS } from './config';
+import { ROAD_HALF_WIDTH, type KingdomMap, type MapPalette } from './config';
 import { Road } from './road';
 import { detailize } from './materials';
 import { makeLantern } from './models';
@@ -19,11 +19,11 @@ export function mulberry32(seed: number) {
 
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
 
-function sandTexture(size = 512) {
+function groundTexture(pal: MapPalette, size = 512) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
   const g = c.getContext('2d')!;
-  g.fillStyle = hex(COLORS.sand);
+  g.fillStyle = hex(pal.ground);
   g.fillRect(0, 0, size, size);
   const rng = mulberry32(7);
   // Soft dunes of light and shade.
@@ -32,7 +32,7 @@ function sandTexture(size = 512) {
     const y = rng() * size;
     const r = 30 + rng() * 90;
     const grad = g.createRadialGradient(x, y, 0, x, y, r);
-    const col = rng() > 0.5 ? COLORS.sandLight : COLORS.sandDark;
+    const col = rng() > 0.5 ? pal.groundLight : pal.groundDark;
     grad.addColorStop(0, hex(col) + '55');
     grad.addColorStop(1, hex(col) + '00');
     g.fillStyle = grad;
@@ -46,7 +46,7 @@ function sandTexture(size = 512) {
   }
   // Grit.
   for (let i = 0; i < 2600; i++) {
-    g.fillStyle = hex(rng() > 0.5 ? COLORS.sandDark : COLORS.sandLight);
+    g.fillStyle = hex(rng() > 0.5 ? pal.groundDark : pal.groundLight);
     g.globalAlpha = 0.25 + rng() * 0.3;
     g.fillRect(rng() * size, rng() * size, 1 + rng() * 2, 1 + rng() * 2);
   }
@@ -62,7 +62,7 @@ function sandTexture(size = 512) {
  * Merges every mesh under `group` into one mesh per material (world transforms baked in).
  * Hundreds of trees, rocks and houses become a couple of draw calls.
  */
-function bakeStatic(group: THREE.Object3D) {
+function bakeStatic(group: THREE.Object3D, tint: [number, number, number]) {
   group.updateMatrixWorld(true);
   const byMat = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[] }>();
   const v = new THREE.Vector3();
@@ -105,7 +105,20 @@ function bakeStatic(group: THREE.Object3D) {
     byMat.set(key, entry);
   });
   const out = new THREE.Group();
-  for (const { mat, geos } of byMat.values()) {
+  // Scenery gets the kingdom's tint (autumn, dusk, snow…) on its own copy of each material.
+  const tinted = new Map<THREE.Material, THREE.Material>();
+  const tintOf = (m: THREE.Material) => {
+    if (tint[0] === 1 && tint[1] === 1 && tint[2] === 1) return m;
+    let t = tinted.get(m);
+    if (!t) {
+      t = m.clone();
+      (t as THREE.MeshStandardMaterial).color.setRGB(tint[0], tint[1], tint[2]);
+      tinted.set(m, t);
+    }
+    return t;
+  };
+  for (const { mat: rawMat, geos } of byMat.values()) {
+    const mat = tintOf(rawMat);
     const merged = mergeGeometries(geos);
     geos.forEach((g) => g.dispose());
     if (!merged) continue;
@@ -120,13 +133,17 @@ function bakeStatic(group: THREE.Object3D) {
 
 export class World {
   readonly sun: THREE.DirectionalLight;
-  readonly roads: Road[];
+  roads: Road[] = [];
   private roadMeshes: THREE.Mesh[] = [];
+  private ground: THREE.Mesh;
+  private decor = new THREE.Group();
+  palette: MapPalette | null = null;
 
-  constructor(scene: THREE.Scene, shadowSize: number) {
-    scene.background = new THREE.Color(COLORS.sky);
-    scene.fog = new THREE.Fog(COLORS.fog, 55, 105);
-
+  constructor(
+    private scene: THREE.Scene,
+    shadowSize: number,
+  ) {
+    scene.fog = new THREE.Fog(0xb8e0f0, 55, 105);
     scene.add(new THREE.HemisphereLight(0xc9dcff, 0x8a6a6a, 0.8));
     const sun = new THREE.DirectionalLight(0xffd29a, 2.5);
     sun.castShadow = true;
@@ -141,24 +158,44 @@ export class World {
     scene.add(sun, sun.target);
     this.sun = sun;
 
-    const tex = sandTexture();
-    tex.repeat.set(14, 14);
-    const ground = new THREE.Mesh(
+    this.ground = new THREE.Mesh(
       new THREE.PlaneGeometry(220, 220),
-      detailize(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 }), 0.45, 0.9),
+      detailize(new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0 }), 0.45, 0.9),
     );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
+    this.ground.rotation.x = -Math.PI / 2;
+    this.ground.receiveShadow = true;
+    scene.add(this.ground, this.decor);
+  }
 
-    this.roads = ROADS.map((pts) => new Road(pts));
-    for (const r of this.roads) {
-      const m = r.makeMesh();
-      scene.add(m);
-      this.roadMeshes.push(m);
+  /** Switches to a kingdom: its roads, ground colours and sky. Call decorate() afterwards. */
+  setMap(map: KingdomMap) {
+    const pal = map.palette;
+    this.palette = pal;
+    this.scene.background = new THREE.Color(pal.sky);
+    (this.scene.fog as THREE.Fog).color.set(pal.fog);
+    const mat = this.ground.material as THREE.MeshStandardMaterial;
+    mat.map?.dispose();
+    const tex = groundTexture(pal);
+    tex.repeat.set(14, 14);
+    mat.map = tex;
+    mat.needsUpdate = true;
+    for (const m of this.roadMeshes) {
+      this.scene.remove(m);
+      m.geometry.dispose();
     }
+    this.roads = map.roads.map((pts) => new Road(pts));
+    this.roadMeshes = this.roads.map((r) => {
+      const m = r.makeMesh(pal.road, pal.roadEdge);
+      this.scene.add(m);
+      return m;
+    });
     // The east road is hidden until it opens.
     this.roadMeshes[1].visible = false;
+    // Clear the previous kingdom's scenery.
+    for (const c of [...this.decor.children]) {
+      this.decor.remove(c);
+      c.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    }
   }
 
   openRoad(i: number, on: boolean) {
@@ -166,7 +203,9 @@ export class World {
   }
 
   /** Scatter KayKit scenery, keeping clear of roads and of the given reserved spots. */
-  decorate(target: THREE.Scene, reserved: { x: number; z: number; r: number }[], assets: Assets) {
+  decorate(reserved: { x: number; z: number; r: number }[], assets: Assets) {
+    const target = this.decor;
+    const pal = this.palette!;
     const rng = mulberry32(2024);
     // Everything static goes into a staging group, then gets merged into a few big meshes.
     const scene = new THREE.Group();
@@ -228,8 +267,8 @@ export class World {
     const props = ['barrel', 'crate_A_big', 'crate_B_big', 'sack', 'wheelbarrow', 'resource_lumber', 'crate_long_A'];
     scatter(props, 26, 8, 24, 0.8, () => 0.8 + rng() * 0.5);
 
-    target.add(bakeStatic(scene));
-    this.scatterGround(target, rng, clear);
+    target.add(bakeStatic(scene, pal.decorTint));
+    this.scatterGround(target, rng, clear, pal);
 
     // Lanterns along the last stretch of each road.
     for (const road of this.roads) {
@@ -243,7 +282,7 @@ export class World {
   }
 
   /** Thousands of grass tufts, flowers and pebbles as instanced meshes: texture for almost free. */
-  private scatterGround(scene: THREE.Scene, rng: () => number, clear: (x: number, z: number, pad: number) => boolean) {
+  private scatterGround(scene: THREE.Object3D, rng: () => number, clear: (x: number, z: number, pad: number) => boolean, pal: MapPalette) {
     const tuftParts: THREE.BufferGeometry[] = [];
     for (let i = 0; i < 6; i++) {
       const blade = new THREE.ConeGeometry(0.05, 0.55, 3);
@@ -264,8 +303,8 @@ export class World {
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
     const c = new THREE.Color();
-    const tuftCols = [0x5f9c3a, 0x76b545, 0x8fcb52, 0x4f8a30];
-    const flowerCols = [0xffffff, 0xffe066, 0xff8fb1, 0xb69cff, 0xff6b5b];
+    const tuftCols = pal.tufts;
+    const flowerCols = pal.flowers;
     const pebbleCols = [0xa9a49a, 0x8f8a82, 0xc2bdb2];
     let ti = 0;
     let fi = 0;

@@ -76,11 +76,12 @@ async function character(src, out, keepAnims, dropMeshes = []) {
 
 // ---------------------------------------------------------------- characters
 
+// The king: a knight without his helmet (a crown is added in-game), sword, shield and cape.
 await character(
-  `${ADV}/Characters/gltf/Mage.glb`,
-  'hero.glb',
-  ['Idle', 'Running_A', 'Spellcast_Shoot', 'Hit_A', 'Death_A', 'Cheer'],
-  ['Spellbook', 'Spellbook_open', '1H_Wand'],
+  `${ADV}/Characters/gltf/Knight.glb`,
+  'king.glb',
+  ['Idle', 'Running_A', '1H_Melee_Attack_Stab', 'Hit_A', 'Death_A', 'Cheer'],
+  ['1H_Sword_Offhand', 'Rectangle_Shield', 'Round_Shield', 'Spike_Shield', '2H_Sword', 'Knight_Helmet'],
 );
 await character(
   `${ADV}/Characters/gltf/Rogue_Hooded.glb`,
@@ -107,10 +108,26 @@ await character(
   ['Idle', 'Walking_A', 'Interact', 'PickUp', 'Cheer', 'Sit_Floor_Idle'],
   ['Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable'],
 );
-const SKEL_ANIMS = ['Walking_A', 'Running_A', '1H_Melee_Attack_Chop', 'Death_A', 'Spawn_Ground', 'Idle_Combat'];
-await character(`${SKEL}/Characters/gltf/Skeleton_Minion.glb`, 'skel_minion.glb', SKEL_ANIMS);
-await character(`${SKEL}/Characters/gltf/Skeleton_Rogue.glb`, 'skel_rogue.glb', SKEL_ANIMS);
-await character(`${SKEL}/Characters/gltf/Skeleton_Warrior.glb`, 'skel_warrior.glb', SKEL_ANIMS);
+// Goblin horde: adventurer rigs that the game re-skins green and gives pointy ears.
+const GOBLIN_ANIMS = ['Walking_A', 'Running_A', '1H_Melee_Attack_Chop', '2H_Melee_Attack_Chop', 'Death_A', 'Idle'];
+await character(
+  `${ADV}/Characters/gltf/Rogue_Hooded.glb`,
+  'goblin.glb',
+  GOBLIN_ANIMS,
+  ['Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Throwable'],
+);
+await character(
+  `${ADV}/Characters/gltf/Rogue.glb`,
+  'goblin_runner.glb',
+  GOBLIN_ANIMS,
+  ['1H_Crossbow', '2H_Crossbow', 'Throwable', 'Rogue_Cape'],
+);
+await character(
+  `${ADV}/Characters/gltf/Barbarian.glb`,
+  'orc.glb',
+  GOBLIN_ANIMS,
+  ['1H_Axe_Offhand', '1H_Axe', 'Mug', 'Barbarian_Round_Shield'],
+);
 
 // ---------------------------------------------------------------- static props bundle
 

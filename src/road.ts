@@ -74,13 +74,13 @@ export class Road {
   }
 
   /** Ribbon mesh: darker centre fading into lighter edges. */
-  makeMesh() {
+  makeMesh(roadColor: number = COLORS.road, edgeColor: number = COLORS.roadEdge) {
     const n = this.pts.length;
     const pos: number[] = [];
     const col: number[] = [];
     const idx: number[] = [];
-    const edge = new THREE.Color(COLORS.roadEdge);
-    const mid = new THREE.Color(COLORS.road);
+    const edge = new THREE.Color(edgeColor);
+    const mid = new THREE.Color(roadColor);
     // Five strips across: sand-blend | edge | centre | edge | sand-blend.
     const offsets = [-ROAD_HALF_WIDTH - 0.9, -ROAD_HALF_WIDTH, 0, ROAD_HALF_WIDTH, ROAD_HALF_WIDTH + 0.9];
     const colors = [edge, edge, mid, edge, edge];

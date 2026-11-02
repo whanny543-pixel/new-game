@@ -916,3 +916,192 @@ h2 {
     transform: scale(1.06);
   }
 }
+
+.res-ico.food {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='%23f0c24a' stroke='%232a1608' stroke-width='1.2'%3E%3Cellipse cx='12' cy='7' rx='2.6' ry='5'/%3E%3Cellipse cx='7.5' cy='9' rx='2.4' ry='4.6' transform='rotate(-25 7.5 9)'/%3E%3Cellipse cx='16.5' cy='9' rx='2.4' ry='4.6' transform='rotate(25 16.5 9)'/%3E%3C/g%3E%3Crect x='11' y='12' width='2' height='10' fill='%23b8862a'/%3E%3C/svg%3E");
+}
+.xp .pill.res {
+  min-width: 50px;
+  padding: 3px 8px 3px 5px;
+  font-size: 15px;
+}
+.xp-bar {
+  min-width: 40px;
+}
+
+/* ------------------------------------------------------------- World map & armory */
+
+#worldmap,
+#armory,
+#victory {
+  z-index: 4;
+}
+.map-wrap {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 100%;
+}
+.map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.map-head h2 {
+  margin: 0;
+}
+.pill.crowns {
+  font-size: 20px;
+}
+.map-board {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 0.9;
+  max-width: 100%;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 4px solid #2b1d12;
+  box-shadow:
+    inset 0 0 40px rgba(90, 60, 20, 0.45),
+    0 8px 0 rgba(0, 0, 0, 0.35);
+}
+.map-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.map-node {
+  pointer-events: auto;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.map-node .pin {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #fff;
+  background: radial-gradient(circle at 35% 30%, #6fa0ff, #2f6fd6 60%, #1f4d9a);
+  border: 3px solid #2b1d12;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  text-shadow: 0 2px 0 #1f2d4a;
+}
+.map-node .name {
+  font-size: 14px;
+  color: #3a2410;
+  background: rgba(255, 244, 214, 0.85);
+  padding: 1px 8px;
+  border-radius: 8px;
+}
+.map-node.won .pin {
+  background: radial-gradient(circle at 35% 30%, #fff1a8, #ffc928 55%, #c98a00);
+  color: #5a3a00;
+  text-shadow: none;
+}
+.map-node.locked {
+  filter: grayscale(1);
+  opacity: 0.6;
+  cursor: default;
+}
+.map-node.next .pin {
+  animation: novaPulse 1s ease-in-out infinite;
+}
+.map-node.selected .pin {
+  outline: 4px solid #fff;
+  outline-offset: 2px;
+}
+#map-card {
+  max-width: none;
+  padding: 14px 16px;
+  text-align: left;
+}
+#map-card h3 {
+  margin: 0;
+  font-size: 26px;
+  color: var(--gold);
+  -webkit-text-stroke: 1.5px var(--ink);
+}
+#map-card p {
+  margin: 6px 0;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+  color: #f1e3c4;
+}
+#map-card .facts b {
+  color: var(--gold);
+}
+.card.armory {
+  max-width: 400px;
+}
+#armory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+  text-align: left;
+}
+.gear {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+}
+.gear-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+.gear-info b {
+  font-size: 18px;
+  color: #fff4d6;
+}
+.gear-lvl {
+  color: var(--gold);
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+.gear-info small {
+  width: 100%;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: #d8c8a8;
+}
+.gear-buy {
+  pointer-events: auto;
+  flex: none;
+  font-family: var(--font);
+  font-size: 16px;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 3px solid #1d4a12;
+  background: linear-gradient(#7ee85f, #3fae2c);
+  box-shadow: 0 4px 0 #1d4a12;
+  cursor: pointer;
+}
+.gear-buy:disabled {
+  background: linear-gradient(#9a8a72, #6e5f4a);
+  border-color: #3a2a1a;
+  box-shadow: 0 4px 0 #3a2a1a;
+  opacity: 0.8;
+  cursor: default;
+}

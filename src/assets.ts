@@ -5,12 +5,12 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { detailize } from './materials';
 
-import heroUrl from './assets/models/hero.glb?url';
+import heroUrl from './assets/models/king.glb?url';
 import archerUrl from './assets/models/archer.glb?url';
 import knightUrl from './assets/models/knight.glb?url';
-import minionUrl from './assets/models/skel_minion.glb?url';
-import rogueUrl from './assets/models/skel_rogue.glb?url';
-import warriorUrl from './assets/models/skel_warrior.glb?url';
+import minionUrl from './assets/models/goblin.glb?url';
+import rogueUrl from './assets/models/goblin_runner.glb?url';
+import warriorUrl from './assets/models/orc.glb?url';
 import propsUrl from './assets/models/props.glb?url';
 import workerUrl from './assets/models/worker.glb?url';
 import villagerUrl from './assets/models/villager.glb?url';

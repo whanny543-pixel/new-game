@@ -34,9 +34,10 @@ export class Hud {
   private perksEl = document.getElementById('perks')!;
   private woodEl = document.getElementById('wood')!;
   private stoneEl = document.getElementById('stone')!;
+  private foodEl = document.getElementById('food')!;
   private novaBtn = document.getElementById('btn-nova')!;
   private novaFill = document.getElementById('nova-fill')!;
-  private res = { wood: -1, stone: -1, nova: -1 };
+  private res = { wood: -1, stone: -1, food: -1, nova: -1 };
   private perkCards = document.getElementById('perk-cards')!;
   private bumpTimer = 0;
 
@@ -49,7 +50,12 @@ export class Hud {
     this.goldTarget = n;
   }
 
-  setResources(wood: number, stone: number) {
+  setResources(wood: number, stone: number, food: number) {
+    if (food !== this.res.food) {
+      this.foodEl.textContent = String(food);
+      this.foodEl.parentElement!.classList.toggle('bump', food > this.res.food && this.res.food >= 0);
+      this.res.food = food;
+    }
     if (wood !== this.res.wood) {
       this.woodEl.textContent = String(wood);
       this.woodEl.parentElement!.classList.toggle('bump', wood > this.res.wood && this.res.wood >= 0);
@@ -121,10 +127,10 @@ export class Hud {
     this.bumpTimer = 0.08;
   }
 
-  setWave(n: number, progress: number) {
+  setWave(n: number, progress: number, of = 0) {
     if (n !== this.last.wave) {
       this.last.wave = n;
-      this.waveLabel.textContent = `Wave ${n}`;
+      this.waveLabel.textContent = of ? `Wave ${n}/${of}` : `Wave ${n}`;
     }
     const p = Math.round(progress * 100);
     if (p !== this.last.waveP) {
@@ -231,8 +237,8 @@ export class Hud {
     for (const el of [...this.bars.keys()]) this.removeBar(el);
     this.last = { gold: -1, wave: -1, waveP: -1, keep: -1, hint: '' };
     this.goldShown = this.goldTarget = 0;
-    this.res = { wood: -1, stone: -1, nova: -1 };
-    this.setResources(0, 0);
+    this.res = { wood: -1, stone: -1, food: -1, nova: -1 };
+    this.setResources(0, 0, 0);
     this.setNova(0);
     this.goldEl.textContent = '0';
     this.setXp(1, 0);

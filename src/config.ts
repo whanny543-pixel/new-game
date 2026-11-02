@@ -51,11 +51,11 @@ export const PLAYER = {
   respawnTime: 3,
   maxVisibleStack: 50,
   maxWeapons: 10,
-  startGold: 14,
+  startGold: 10,
 };
 
 /** Each coin is worth more as waves climb, so late builds still come quickly. */
-export const coinValue = (wave: number) => 1 + Math.floor(Math.max(0, wave - 1) / 2);
+export const coinValue = (wave: number) => 1 + Math.floor(Math.max(0, wave - 1) / 3);
 
 export const HALL = { maxHp: 1200, regen: 3, radius: 3.4 };
 
@@ -102,8 +102,8 @@ export interface EnemyType {
 }
 
 export const ENEMIES: Record<EnemyKind, EnemyType> = {
-  goblin: { hp: 26, speed: 2.5, damage: 7, radius: 0.42, coin: 1 },
-  runner: { hp: 16, speed: 4.2, damage: 5, radius: 0.36, coin: 1 },
+  goblin: { hp: 28, speed: 2.5, damage: 9, radius: 0.42, coin: 1 },
+  runner: { hp: 18, speed: 4.3, damage: 7, radius: 0.36, coin: 1 },
   troll: { hp: 520, speed: 1.3, damage: 34, radius: 1.05, coin: 20, boss: true },
 };
 
@@ -112,8 +112,8 @@ export const WAVES = {
   duration: 22,
   breakTime: 3,
   baseCount: 14,
-  countPerWave: 7,
-  hpGrowth: 0.1,
+  countPerWave: 8,
+  hpGrowth: 0.13,
   roadBWave: 7,
 };
 
@@ -155,7 +155,7 @@ export type PlotKind =
   | 'recruitKnight'
   | 'camp'
   | 'quarry'
-  | 'gate'
+  | 'farm'
   | 'castle';
 
 /** Where a plot sits: fixed coordinates, or beside/on a road at a fraction of its length. */
@@ -169,6 +169,7 @@ export interface PlotDef {
   /** Kingdom wood / stone needed per level (paid from the stockpile when the gold is in). */
   wood?: number[];
   stone?: number[];
+  food?: number[];
   /** Plot ids that must be built first; "wave:N" waits for wave N, "castle:N" for castle level N. */
   requires: string[];
   /** Extra requirement per level, e.g. a stone gate needs castle level 2. */
@@ -180,53 +181,41 @@ export interface PlotDef {
 const recruitCosts = (start: number, step: number) => Array.from({ length: 60 }, (_, i) => start + i * step);
 
 export const PLOTS: PlotDef[] = [
-  { id: 'tw1', kind: 'tower', place: { road: 0, t: 0.86, side: 1, dist: 3.8 }, costs: [5, 25, 70], requires: [] },
-  { id: 'tw2', kind: 'tower', place: { road: 0, t: 0.66, side: -1, dist: 3.8 }, costs: [8, 30, 80], requires: ['tw1'] },
-  { id: 'range', kind: 'range', place: { x: -8, z: 3 }, costs: [12], requires: ['tw1'] },
-  { id: 'recA', kind: 'recruitArcher', place: { x: -8, z: 8.6 }, costs: recruitCosts(4, 1), requires: ['range'] },
-  { id: 'bar1', kind: 'barricade', place: { road: 0, t: 0.79, side: 0, dist: 0 }, costs: [8], requires: ['tw2'] },
-  { id: 'gp1', kind: 'post', place: { road: 0, t: 0.74, side: 0, dist: 0 }, costs: [12, 45], requires: ['range'] },
-  { id: 'barracks', kind: 'barracks', place: { x: 7.5, z: 7.5 }, costs: [18], requires: ['gp1'] },
-  { id: 'recK', kind: 'recruitKnight', place: { x: 11.6, z: 9.8 }, costs: recruitCosts(5, 2), requires: ['barracks'] },
-  { id: 'forge', kind: 'forge', place: { x: -9, z: -5 }, costs: [22, 70, 160], requires: ['barracks'] },
-  { id: 'tw3', kind: 'tower', place: { road: 0, t: 0.46, side: 1, dist: 3.8 }, costs: [18, 50, 120], requires: ['tw2'] },
-  { id: 'bowyer', kind: 'bowyer', place: { x: -2.5, z: 12 }, costs: [22, 70, 160], requires: ['forge'] },
+  { id: 'tw1', kind: 'tower', place: { road: 0, t: 0.86, side: 1, dist: 3.8 }, costs: [5, 30, 80], requires: [] },
+  { id: 'tw2', kind: 'tower', place: { road: 0, t: 0.66, side: -1, dist: 3.8 }, costs: [10, 35, 90], requires: ['tw1'] },
+  { id: 'range', kind: 'range', place: { x: -8, z: 3 }, costs: [14], requires: ['tw1'] },
+  { id: 'recA', kind: 'recruitArcher', place: { x: -8, z: 8.6 }, costs: recruitCosts(5, 1), food: recruitCosts(2, 0), requires: ['range'] },
+  { id: 'bar1', kind: 'barricade', place: { road: 0, t: 0.79, side: 0, dist: 0 }, costs: [10], requires: ['tw2'] },
+  { id: 'gp1', kind: 'post', place: { road: 0, t: 0.74, side: 0, dist: 0 }, costs: [15, 50], requires: ['range'] },
+  { id: 'barracks', kind: 'barracks', place: { x: 7.5, z: 7.5 }, costs: [22], requires: ['gp1'] },
+  { id: 'recK', kind: 'recruitKnight', place: { x: 11.6, z: 9.8 }, costs: recruitCosts(6, 2), food: recruitCosts(3, 0), requires: ['barracks'] },
+  { id: 'forge', kind: 'forge', place: { x: -9, z: -5 }, costs: [26, 80, 180], requires: ['barracks'] },
+  { id: 'tw3', kind: 'tower', place: { road: 0, t: 0.46, side: 1, dist: 3.8 }, costs: [22, 58, 135], requires: ['tw2'] },
+  { id: 'bowyer', kind: 'bowyer', place: { x: -2.5, z: 12 }, costs: [26, 80, 180], requires: ['forge'] },
   { id: 'tw4', kind: 'tower', place: { road: 0, t: 0.32, side: -1, dist: 3.8 }, costs: [28, 65, 140], requires: ['tw3'] },
   { id: 'gp2', kind: 'post', place: { road: 0, t: 0.53, side: 0, dist: 0 }, costs: [24, 60], requires: ['tw3'] },
   { id: 'bar2', kind: 'barricade', place: { road: 0, t: 0.58, side: 0, dist: 0 }, costs: [15], requires: ['gp2'] },
   // The east road opens later in the run.
-  { id: 'tw5', kind: 'tower', place: { road: 1, t: 0.8, side: 1, dist: 3.8 }, costs: [30, 80, 180], requires: ['wave:7'] },
-  { id: 'tw6', kind: 'tower', place: { road: 1, t: 0.55, side: -1, dist: 3.8 }, costs: [40, 95, 200], requires: ['wave:7'] },
-  { id: 'gp3', kind: 'post', place: { road: 1, t: 0.68, side: 0, dist: 0 }, costs: [35, 90], requires: ['wave:7'] },
-  { id: 'bar3', kind: 'barricade', place: { road: 1, t: 0.74, side: 0, dist: 0 }, costs: [25], requires: ['wave:7'] },
+  { id: 'tw5', kind: 'tower', place: { road: 1, t: 0.8, side: 1, dist: 3.8 }, costs: [30, 80, 180], requires: ['roadB'] },
+  { id: 'tw6', kind: 'tower', place: { road: 1, t: 0.55, side: -1, dist: 3.8 }, costs: [40, 95, 200], requires: ['roadB'] },
+  { id: 'gp3', kind: 'post', place: { road: 1, t: 0.68, side: 0, dist: 0 }, costs: [35, 90], requires: ['roadB'] },
+  { id: 'bar3', kind: 'barricade', place: { road: 1, t: 0.74, side: 0, dist: 0 }, costs: [25], requires: ['roadB'] },
   // --- Kingdom ---
-  { id: 'camp', kind: 'camp', place: { x: -15, z: -11 }, costs: [20, 60, 140], requires: ['tw2'] },
-  { id: 'quarry', kind: 'quarry', place: { x: -18, z: 8 }, costs: [30, 80, 170], wood: [10, 25, 50], requires: ['camp'] },
-  { id: 'castle', kind: 'castle', place: { x: -4.6, z: 4.6 }, costs: [50, 130, 280], wood: [20, 50, 100], stone: [0, 30, 80], requires: ['camp'] },
+  { id: 'camp', kind: 'camp', place: { x: -15, z: -11 }, costs: [22, 65, 150], requires: ['tw2'] },
+  { id: 'quarry', kind: 'quarry', place: { x: -19, z: 10 }, costs: [35, 90, 190], wood: [12, 28, 55], requires: ['castle'] },
+  // One castle plot drives the whole kingdom: castle model, town walls, gates and houses.
   {
-    id: 'gateA',
-    kind: 'gate',
-    place: { road: 0, t: 0.92, side: 0, dist: 0 },
-    pad: { road: 0, t: 0.975, side: -1, dist: 3.3 },
-    costs: [25, 60, 130],
-    wood: [15, 0, 30],
-    stone: [0, 30, 60],
-    levelNeeds: ['', 'castle:2', 'castle:3'],
+    id: 'castle',
+    kind: 'castle',
+    place: { x: -4.6, z: 4.8 },
+    costs: [25, 70, 140, 250, 420],
+    wood: [12, 30, 40, 60, 100],
+    stone: [0, 0, 35, 90, 160],
     requires: ['camp'],
   },
-  {
-    id: 'gateB',
-    kind: 'gate',
-    place: { road: 1, t: 0.86, side: 0, dist: 0 },
-    pad: { road: 1, t: 0.93, side: 1, dist: 3.3 },
-    costs: [30, 70, 150],
-    wood: [18, 0, 35],
-    stone: [0, 35, 70],
-    levelNeeds: ['', 'castle:2', 'castle:3'],
-    requires: ['camp', 'wave:7'],
-  },
-  { id: 'tw7', kind: 'tower', place: { road: 0, t: 0.18, side: 1, dist: 3.8 }, costs: [50, 110, 230], requires: ['tw4', 'wave:8'] },
-  { id: 'tw8', kind: 'tower', place: { road: 1, t: 0.32, side: 1, dist: 3.8 }, costs: [55, 120, 240], requires: ['tw6', 'wave:9'] },
+  { id: 'farm', kind: 'farm', place: { x: -21, z: -2 }, costs: [25, 70, 150], wood: [10, 25, 50], requires: ['range'] },
+  { id: 'tw7', kind: 'tower', place: { road: 0, t: 0.18, side: 1, dist: 3.8 }, costs: [50, 110, 230], requires: ['tw4', 'wave:6'] },
+  { id: 'tw8', kind: 'tower', place: { road: 1, t: 0.32, side: 1, dist: 3.8 }, costs: [55, 120, 240], requires: ['tw6', 'roadB'] },
 ];
 
 /** On-road plots (posts, barricades) put their pad beside the road on this side. */
@@ -234,18 +223,27 @@ export const ROADSIDE_PAD = { side: -1, dist: 3.6 };
 
 // ------------------------------------------------------------------ kingdom
 
+/** The castle grows from a log camp to a citadel; town walls, gates and houses grow with it. */
 export const CASTLE_LEVELS = [
-  { name: 'Keep', hp: 1200, builders: 1, villagers: 3 },
-  { name: 'Castle', hp: 1700, builders: 2, villagers: 5 },
-  { name: 'Stronghold', hp: 2300, builders: 2, villagers: 7 },
-  { name: 'Citadel', hp: 3000, builders: 3, villagers: 9 },
+  { name: 'Camp', hp: 700, builders: 1, villagers: 2, walls: 0, radius: 2.2 },
+  { name: 'Wooden Hall', hp: 1000, builders: 1, villagers: 3, walls: 1, radius: 2.4 },
+  { name: 'Timber Fort', hp: 1400, builders: 2, villagers: 4, walls: 2, radius: 2.8 },
+  { name: 'Stone Keep', hp: 1900, builders: 2, villagers: 6, walls: 3, radius: 2.8 },
+  { name: 'Castle', hp: 2600, builders: 3, villagers: 8, walls: 4, radius: 3.4 },
+  { name: 'Citadel', hp: 3400, builders: 3, villagers: 10, walls: 5, radius: 4 },
 ];
 
-export const GATE_TIERS = [
-  { name: 'Wooden Gate', hp: 500, gate: 'fence_wood_straight_gate', wall: 'fence_wood_straight', archers: 0 },
-  { name: 'Stone Gate', hp: 1300, gate: 'fence_stone_straight_gate', wall: 'fence_stone_straight', archers: 0 },
-  { name: 'Castle Gate', hp: 2600, gate: 'wall_straight_gate', wall: 'wall_straight', archers: 2 },
+/** Town wall tiers (index = CASTLE_LEVELS[].walls). Gates exist from tier 2. */
+export const WALL_TIERS = [
+  { name: 'No walls', wall: '', gate: '', gateHp: 0, archers: 0, coverage: 0 },
+  { name: 'Stakes', wall: 'fence_wood_straight', gate: '', gateHp: 0, archers: 0, coverage: 0.35 },
+  { name: 'Wooden Palisade', wall: 'fence_wood_straight', gate: 'fence_wood_straight_gate', gateHp: 550, archers: 0, coverage: 1 },
+  { name: 'Stone Wall', wall: 'fence_stone_straight', gate: 'fence_stone_straight_gate', gateHp: 1400, archers: 0, coverage: 1 },
+  { name: 'Castle Wall', wall: 'wall_straight', gate: 'wall_straight_gate', gateHp: 2700, archers: 2, coverage: 1 },
+  { name: 'Citadel Wall', wall: 'wall_straight', gate: 'wall_straight_gate', gateHp: 3600, archers: 2, coverage: 1 },
 ];
+/** Town wall ring around the castle. */
+export const TOWN_WALL = { cx: 0, cz: 2.5, r: 16.5 };
 
 export const WORKERS = {
   speed: 3.4,
@@ -255,9 +253,219 @@ export const WORKERS = {
   stonePerTrip: 4,
   /** Woodcutters / miners per building level. */
   perLevel: [2, 3, 4],
+  harvestTime: 2.4,
+  foodPerTrip: 3,
+  startFood: 10,
   treeRegrow: 18,
   repairRate: 45, // hp per second per builder
 };
 
 /** Active ability: charged by kills, blasts the horde around the hero. */
 export const NOVA = { killsToCharge: 35, radius: 7.5, damage: 160, knockback: 3.2 };
+
+// ------------------------------------------------------------------ campaign
+
+export interface MapPalette {
+  ground: number;
+  groundDark: number;
+  groundLight: number;
+  tufts: number[];
+  flowers: number[];
+  /** Multiplies the colours of trees, rocks and hills. */
+  decorTint: [number, number, number];
+  sky: number;
+  fog: number;
+  road: number;
+  roadEdge: number;
+}
+
+export interface KingdomMap {
+  id: string;
+  name: string;
+  blurb: string;
+  waves: number;
+  hpMul: number;
+  countMul: number;
+  roadBWave: number;
+  roads: [number, number][][];
+  palette: MapPalette;
+  /** Position on the world map (0..100). */
+  mapX: number;
+  mapY: number;
+}
+
+const MEADOW: MapPalette = {
+  ground: 0x79b84a,
+  groundDark: 0x5f9c3a,
+  groundLight: 0x98d05c,
+  tufts: [0x5f9c3a, 0x76b545, 0x8fcb52, 0x4f8a30],
+  flowers: [0xffffff, 0xffe066, 0xff8fb1, 0xb69cff, 0xff6b5b],
+  decorTint: [1, 1, 1],
+  sky: 0x9fd4f2,
+  fog: 0xb8e0f0,
+  road: 0xb07a4a,
+  roadEdge: 0xc29262,
+};
+
+export const KINGDOMS: KingdomMap[] = [
+  {
+    id: 'greenvale',
+    name: 'Greenvale',
+    blurb: 'Rolling meadows. The goblins are only testing you.',
+    waves: 10,
+    hpMul: 1.05,
+    countMul: 1,
+    roadBWave: 7,
+    roads: ROADS,
+    palette: MEADOW,
+    mapX: 22,
+    mapY: 74,
+  },
+  {
+    id: 'amberwood',
+    name: 'Amberwood',
+    blurb: 'An autumn forest. Bigger warbands, and the east road opens sooner.',
+    waves: 12,
+    hpMul: 1.35,
+    countMul: 1.2,
+    roadBWave: 5,
+    roads: [
+      [
+        [10, -54],
+        [16, -44],
+        [6, -36],
+        [-8, -32],
+        [-6, -24],
+        [9, -21],
+        [12, -13],
+        [5, -7.5],
+        [3.0, -2.6],
+      ],
+      [
+        [46, 6],
+        [38, -4],
+        [28, -12],
+        [20, -6],
+        [13, 1],
+        [6, 2],
+        [3.9, 1.2],
+      ],
+    ],
+    palette: {
+      ground: 0xb8a24a,
+      groundDark: 0x9c7f34,
+      groundLight: 0xd2b866,
+      tufts: [0xc98a3a, 0xb06a2a, 0xd9a24a, 0x9c7a30],
+      flowers: [0xffd34d, 0xff8a3a, 0xffffff, 0xd94a2a],
+      decorTint: [1.45, 0.92, 0.5],
+      sky: 0xf2d1a0,
+      fog: 0xf0c890,
+      road: 0x9c6a3c,
+      roadEdge: 0xb08050,
+    },
+    mapX: 48,
+    mapY: 56,
+  },
+  {
+    id: 'ashmoor',
+    name: 'Ashmoor',
+    blurb: 'A bleak moor at dusk. The east road opens early, and the goblins are tougher.',
+    waves: 14,
+    hpMul: 1.45,
+    countMul: 1.25,
+    roadBWave: 4,
+    roads: [
+      [
+        [-18, -50],
+        [-6, -46],
+        [-12, -36],
+        [-2, -27],
+        [9, -21],
+        [12, -13],
+        [5, -7.5],
+        [3.0, -2.6],
+      ],
+      [
+        [44, -26],
+        [34, -26],
+        [30, -14],
+        [20, -6],
+        [13, 1],
+        [6, 2],
+        [3.9, 1.2],
+      ],
+    ],
+    palette: {
+      ground: 0x7a7f63,
+      groundDark: 0x5d6150,
+      groundLight: 0x939878,
+      tufts: [0x6e6a52, 0x857a5a, 0x5a5c48, 0x9a8f6a],
+      flowers: [0xb69cff, 0x8a6aff, 0xd6c6ff],
+      decorTint: [0.78, 0.8, 0.9],
+      sky: 0x8a86a8,
+      fog: 0x9a96b0,
+      road: 0x6e5a48,
+      roadEdge: 0x857060,
+    },
+    mapX: 70,
+    mapY: 38,
+  },
+  {
+    id: 'frostpeak',
+    name: 'Frostpeak',
+    blurb: 'Snowbound pass beneath the mountains. The final stand.',
+    waves: 16,
+    hpMul: 1.7,
+    countMul: 1.38,
+    roadBWave: 3,
+    roads: [
+      [
+        [0, -54],
+        [-14, -46],
+        [-10, -34],
+        [-4, -26],
+        [9, -21],
+        [12, -13],
+        [5, -7.5],
+        [3.0, -2.6],
+      ],
+      [
+        [46, -14],
+        [38, -20],
+        [26, -16],
+        [20, -6],
+        [13, 1],
+        [6, 2],
+        [3.9, 1.2],
+      ],
+    ],
+    palette: {
+      ground: 0xe6eef5,
+      groundDark: 0xc9d6e2,
+      groundLight: 0xffffff,
+      tufts: [0xb8c8d8, 0xd0dce8, 0x9fb2c4],
+      flowers: [0xffffff, 0xcfe8ff],
+      decorTint: [1.25, 1.35, 1.5],
+      sky: 0xc9dff0,
+      fog: 0xdfeaf4,
+      road: 0x9a8070,
+      roadEdge: 0xb8a294,
+    },
+    mapX: 82,
+    mapY: 16,
+  },
+];
+
+/** The king's armory: permanent upgrades bought with crowns earned in battle. */
+export const GEAR = [
+  { id: 'sword', name: 'Royal Sword', desc: '+12% damage', max: 5 },
+  { id: 'armor', name: 'Royal Armour', desc: '+15% health', max: 5 },
+  { id: 'boots', name: 'Swift Boots', desc: '+5% speed', max: 3 },
+  { id: 'banner', name: 'War Banner', desc: '+8% troop damage', max: 5 },
+  { id: 'treasury', name: 'Treasury', desc: '+10 starting gold', max: 5 },
+  { id: 'scepter', name: 'Scepter', desc: 'Nova charges 12% faster', max: 4 },
+] as const;
+export type GearId = (typeof GEAR)[number]['id'];
+export const GEAR_COSTS = [20, 45, 80, 130, 200];
+/** Crowns earned: per wave survived, and for winning a kingdom. */
+export const CROWNS = { perWave: (k: number) => 2 + k, victory: (k: number) => 40 * (k + 1) };

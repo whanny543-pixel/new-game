@@ -94,14 +94,15 @@ export interface HeroRig {
 }
 
 export function makeHero(): HeroRig {
-  const char = A.character('hero', 2.5);
+  const char = A.character('hero', 2.35);
   const root = char.root;
-  // Staff tip: where the magic bolts leave from.
+  dressAsKing(char);
+  // Golden bolts leave from the tip of the royal sword.
   const muzzle = new THREE.Object3D();
-  const staff = char.find('2H_Staff');
-  if (staff) {
-    staff.add(muzzle);
-    muzzle.position.set(0, 1.05, 0);
+  const sword = char.find('1H_Sword');
+  if (sword) {
+    sword.add(muzzle);
+    muzzle.position.set(0, 0.9, 0);
   } else {
     muzzle.position.set(0.4, 1.4, 0.4);
     root.add(muzzle);
@@ -121,6 +122,48 @@ export function makeHero(): HeroRig {
   root.add(ring);
   char.loop('Idle');
   return { root, char, muzzle, backAnchor, frontAnchor, ring };
+}
+
+/** Crown, red royal cape and gilded armour turn the knight model into the king. */
+function dressAsKing(char: CharRig) {
+  const gold = new THREE.MeshStandardMaterial({ color: 0xffc933, metalness: 0.9, roughness: 0.25, emissive: 0x6a4400, emissiveIntensity: 0.35 });
+  const crown = new THREE.Group();
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.31, 0.2, 16, 1, true), gold);
+  band.material.side = THREE.DoubleSide;
+  crown.add(band);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const spike = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.22, 5), gold);
+    spike.position.set(Math.cos(a) * 0.32, 0.19, Math.sin(a) * 0.32);
+    crown.add(spike);
+    const gem = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045, 8, 6),
+      new THREE.MeshStandardMaterial({ color: i % 2 ? 0xe2343b : 0x2f6fd6, roughness: 0.2, emissive: i % 2 ? 0x5a0000 : 0x001a5a }),
+    );
+    gem.position.set(Math.cos(a) * 0.335, 0.0, Math.sin(a) * 0.335);
+    crown.add(gem);
+  }
+  const head = char.find('head');
+  if (head) {
+    head.add(crown);
+    crown.position.set(0, 1.12, 0);
+    crown.scale.setScalar(1.25);
+  }
+  char.model.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || m.parent === crown || o.parent?.parent === crown) return;
+    if (o.name === 'Knight_Cape') {
+      m.material = new THREE.MeshStandardMaterial({ color: 0xb3122a, roughness: 0.75 });
+      return;
+    }
+    if (o.name === 'Badge_Shield' || o.name === '1H_Sword') return;
+    // Gild the armour: warm tint on a private copy of the material.
+    const mat = (m.material as THREE.MeshStandardMaterial).clone();
+    mat.color.setRGB(1.12, 0.98, 0.72);
+    mat.metalness = 0.35;
+    mat.roughness = 0.45;
+    m.material = mat;
+  });
 }
 
 export interface UnitRig {
@@ -214,21 +257,107 @@ export function makeBarricade(len: number) {
   return g;
 }
 
-export function makeHall() {
+/** The castle at each level: a log camp, a wooden hall, a timber fort, a stone keep, a castle, a citadel. */
+export function makeCastle(level: number) {
   const root = new THREE.Group();
-  const castle = A.prop('building_castle_blue', 8.5);
-  root.add(castle);
-  const banners = new THREE.Group();
-  for (const x of [-2.8, 2.8]) {
-    const b = A.prop('flag_blue', 2.8);
-    b.position.set(x, 0, 3.4);
-    banners.add(b);
+  const add = (name: string, size: number, x: number, z: number, ry = 0, axis: 'y' | 'max' = 'max') => {
+    const o = A.prop(name, size, axis);
+    o.position.set(x, 0, z);
+    o.rotation.y = ry;
+    root.add(o);
+    return o;
+  };
+  switch (level) {
+    case 0:
+      // Just a few logs, a tent and a campfire.
+      add('tent', 2.6, -0.6, -0.4, 0.3);
+      add('resource_lumber', 1.4, 1.6, 0.6, 0.8);
+      add('resource_lumber', 1.2, -1.9, 1.2, -0.4);
+      add('barrel', 0.8, 1.4, -1.2);
+      root.add(campfire());
+      break;
+    case 1:
+      add('building_home_B_blue', 4.4, 0, -0.3, Math.PI);
+      add('resource_lumber', 1.2, 2.4, 1.4, 0.6);
+      root.add(campfire(-2.2, 1.8));
+      break;
+    case 2:
+      add('building_tavern_blue', 5.6, 0, -0.3, Math.PI);
+      add('flag_blue', 2.6, -2.6, 2.4, 0, 'y');
+      add('flag_blue', 2.6, 2.6, 2.4, 0, 'y');
+      break;
+    case 3:
+      add('building_tower_B_blue', 7.2, 0, -0.6, Math.PI, 'y');
+      add('building_home_A_blue', 3.4, -2.6, 0.8, Math.PI);
+      add('flag_blue', 2.8, 2.4, 2.4, 0, 'y');
+      break;
+    case 4:
+      add('building_castle_blue', 8.5, 0, 0, 0, 'y');
+      add('flag_blue', 2.8, -2.8, 3.4, 0, 'y');
+      add('flag_blue', 2.8, 2.8, 3.4, 0, 'y');
+      break;
+    default:
+      add('building_castle_blue', 10, 0, 0, 0, 'y');
+      add('building_tower_A_blue', 7, -4.6, -1.4, 0, 'y');
+      add('building_tower_A_blue', 7, 4.6, -1.4, 0, 'y');
+      add('flag_blue', 3.2, -3.2, 4, 0, 'y');
+      add('flag_blue', 3.2, 3.2, 4, 0, 'y');
+      break;
   }
-  root.add(banners);
   const lamp = new THREE.PointLight(0xffb357, 6, 9, 1.6);
   lamp.position.set(0, 2.2, 3.4);
   root.add(lamp);
-  return { root, banners };
+  return root;
+}
+
+function campfire(x = 0.4, z = 2.0) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.8, 6), MAT.woodDark);
+    log.rotation.set(Math.PI / 2, (i / 4) * Math.PI * 2, 0.4);
+    log.position.y = 0.12;
+    g.add(log);
+  }
+  const fire = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 7), MAT.fire);
+  fire.position.y = 0.35;
+  g.add(fire);
+  const light = new THREE.PointLight(0xff8a3a, 4, 6, 1.8);
+  light.position.y = 0.9;
+  g.add(light);
+  g.position.set(x, 0, z);
+  return g;
+}
+
+/**
+ * The town wall: a ring of wall pieces around the castle. `canPlace` keeps it off roads
+ * (gates go there), buildings and plots. Low tiers only have scattered stakes.
+ */
+export function makeTownWall(tier: { wall: string; coverage: number }, towers: boolean, cx: number, cz: number, r: number, canPlace: (x: number, z: number) => boolean) {
+  const g = new THREE.Group();
+  if (!tier.wall) return g;
+  const seg = tier.wall === 'wall_straight' ? 2.7 : 2.25;
+  const n = Math.floor((2 * Math.PI * r) / seg);
+  for (let i = 0; i < n; i++) {
+    // Deterministic "random" gaps for the early stake fence.
+    if (tier.coverage < 1 && ((i * 37) % 100) / 100 > tier.coverage) continue;
+    const th = (i / n) * Math.PI * 2;
+    const x = cx + Math.cos(th) * r;
+    const z = cz + Math.sin(th) * r;
+    if (!canPlace(x, z)) continue;
+    const holder = new THREE.Group();
+    const piece = A.prop(tier.wall, seg + 0.08, 'max');
+    orientAlongX(piece);
+    holder.add(piece);
+    holder.position.set(x, 0, z);
+    holder.rotation.y = -th - Math.PI / 2;
+    g.add(holder);
+    if (towers && i % 6 === 0) {
+      const t = A.prop('building_tower_A_blue', 4.4, 'y');
+      t.position.set(x, 0, z);
+      g.add(t);
+    }
+  }
+  return g;
 }
 
 export interface WorkshopRig {
