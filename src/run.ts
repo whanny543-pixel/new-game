@@ -17,6 +17,7 @@ import {
   TOWER_LEVELS,
   WAVES,
   WORKSHOP,
+  coinValue,
   type EnemyKind,
   type EnemyType,
   type Place,
@@ -24,6 +25,7 @@ import {
 } from './config';
 import * as M from './models';
 import { Plot } from './plot';
+import { BASE_STATS, xpForLevel, type HeroStats, type Perk } from './perks';
 import type { Fx } from './fx';
 import type { Sfx } from './audio';
 import type { Hud } from './hud';
@@ -134,6 +136,8 @@ interface Workshop {
 }
 
 interface Arrow {
+  hero: boolean;
+  crit: boolean;
   mesh: THREE.Mesh;
   pos: THREE.Vector3;
   target: Enemy | null;
@@ -152,6 +156,7 @@ interface Bolt {
 }
 
 interface GroundCoin {
+  value: number;
   mesh: THREE.Mesh;
   vel: THREE.Vector3;
   active: boolean;
@@ -164,9 +169,22 @@ interface SpawnItem {
   road: number;
 }
 
+interface Chest {
+  root: THREE.Group;
+  lid: THREE.Object3D;
+  pos: THREE.Vector3;
+  vy: number;
+  y: number;
+  open: number;
+  gold: number;
+  beam: THREE.Mesh;
+}
+
 export interface RunEvents {
   onGameOver(wave: number): void;
   haptic(strong: boolean): void;
+  hurt(amount: number): void;
+  flash(amount: number): void;
 }
 
 const MAX_ENEMIES: Record<EnemyKind, number> = { goblin: 420, runner: 220, troll: 24 };
@@ -184,6 +202,19 @@ export class Run {
   heroFacing = Math.PI;
   private moveDir = new THREE.Vector3(0, 0, -1);
   heroHp = PLAYER.maxHp;
+  stats: HeroStats = { ...BASE_STATS };
+  perkLevels: Record<string, number> = {};
+  xp = 0;
+  level = 1;
+  pendingLevelUps = 0;
+  combo = 0;
+  bestCombo = 0;
+  kills = 0;
+  private lastKill = -99;
+  /** Seconds of slow-motion left (hit-stop on big moments). */
+  hitstop = 0;
+  private stepT = 0;
+  private chests: Chest[] = [];
   heroAlive = true;
   private respawnT = 0;
   private heroCd = 0;
@@ -278,7 +309,7 @@ export class Run {
       const mesh = new THREE.Mesh(M.GEO.arrow, M.MAT.arrow);
       mesh.visible = false;
       this.root.add(mesh);
-      this.arrows.push({ mesh, pos: new THREE.Vector3(), target: null, aim: new THREE.Vector3(), damage: 0, active: false });
+      this.arrows.push({ hero: false, crit: false, mesh, pos: new THREE.Vector3(), target: null, aim: new THREE.Vector3(), damage: 0, active: false });
     }
     for (let i = 0; i < 16; i++) {
       const mesh = new THREE.Mesh(M.GEO.bolt, M.MAT.bolt);
@@ -291,7 +322,7 @@ export class Run {
       mesh.castShadow = true;
       mesh.visible = false;
       this.root.add(mesh);
-      this.coins.push({ mesh, vel: new THREE.Vector3(), active: false, age: 0 });
+      this.coins.push({ value: 1, mesh, vel: new THREE.Vector3(), active: false, age: 0 });
     }
     const dotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
     for (let i = 0; i < 18; i++) {
@@ -312,7 +343,7 @@ export class Run {
     }
 
     // A little gold on the ground teaches the collect → build loop straight away.
-    for (let i = 0; i < 8; i++) this.dropCoin(v1.set(-1.75 + i * 0.5, 0.3, 7.2), 0.4);
+    for (let i = 0; i < PLAYER.startGold; i++) this.dropCoin(v1.set(-3.25 + (i % 7) * 1.08, 0.3, 7.2 + Math.floor(i / 7) * 0.9), 0.4, 1);
   }
 
   private get roads(): Road[] {
@@ -378,14 +409,16 @@ export class Run {
     return this.hero.frontAnchor.localToWorld(out);
   }
 
-  private dropCoin(at: THREE.Vector3, spread = 2.5) {
+  private dropCoin(at: THREE.Vector3, spread = 2.5, value = coinValue(this.wave)) {
     const c = this.coins.find((q) => !q.active);
     if (!c) {
       // Pool exhausted: bank it directly rather than losing the reward.
-      this.carry++;
+      this.carry += value;
       return;
     }
     c.active = true;
+    c.value = value;
+    c.mesh.scale.setScalar(value > 1 ? 1.25 : 1);
     c.age = 0;
     c.mesh.visible = true;
     c.mesh.position.copy(at);
@@ -394,8 +427,8 @@ export class Run {
     c.vel.set(Math.cos(a) * s, 4 + Math.random() * 2.5, Math.sin(a) * s);
   }
 
-  private gainCoin() {
-    this.carry++;
+  private gainCoin(value = 1) {
+    this.carry += value;
     this.pickupCombo++;
     this.pickupComboT = 0.6;
     this.sfx.pickup(this.pickupCombo);
@@ -424,13 +457,22 @@ export class Run {
     this.updateArrows(dt);
     this.updateBolts(dt);
     this.updateCoins(dt);
+    this.updateChests(dt);
     this.updatePlots(dt);
     this.updateHall(dt);
     this.updateGuide();
     this.updateStacks(dt);
     this.drawCrowd();
     this.hud.setGold(this.carry);
-    this.hud.hint(this.currentHint());
+    if (!this.chests.some((c) => c.open === 0)) this.hud.hint(this.currentHint());
+    if (this.time - this.lastKill > 2.2 && this.combo) {
+      this.combo = 0;
+      this.hud.setCombo(0);
+    }
+    // Heartbeat vignette while the hall is in danger.
+    if (this.hallHp / HALL.maxHp < 0.3) this.events.hurt(0.25 + Math.sin(this.time * 6) * 0.15);
+    // Ambient dust motes.
+    if (Math.random() < 0.1) this.fx.p.motes(this.heroPos);
   }
 
   // ------------------------------------------------------------------ hero
@@ -442,16 +484,17 @@ export class Run {
       rig.root.visible = false;
       if (this.respawnT <= 0) {
         this.heroAlive = true;
-        this.heroHp = PLAYER.maxHp;
+        this.heroHp = this.stats.maxHp;
         this.heroPos.set(0, 0, 5.5);
         rig.root.visible = true;
-        this.fx.burst(v1.copy(this.heroPos).setY(1), COLORS.coin, 14, 4);
+        this.fx.p.levelUp(v1.copy(this.heroPos).setY(0.5));
+        this.fx.pillar(this.heroPos, 0xffe08a, 1.2);
       }
       this.hud.placeBar(this.heroBar, null, 0);
       return;
     }
 
-    const speed = PLAYER.speed;
+    const speed = PLAYER.speed * this.stats.speed;
     this.heroVel.set(move.x * speed, 0, move.y * speed);
     this.heroPos.addScaledVector(this.heroVel, dt);
     this.heroPos.x = THREE.MathUtils.clamp(this.heroPos.x, -40, 48);
@@ -462,7 +505,14 @@ export class Run {
     if (moving) {
       this.walkT += dt * 11;
       this.moveDir.copy(this.heroVel).normalize();
+      this.stepT -= dt;
+      if (this.stepT <= 0) {
+        this.stepT = 0.11;
+        this.fx.p.dust(v1.copy(this.heroPos).setY(0.1));
+      }
     } else this.walkT = 0;
+    rig.ring.rotation.z += dt * 1.5;
+    (rig.ring.material as THREE.MeshBasicMaterial).opacity = 0.35 + Math.sin(this.time * 4) * 0.12;
 
     this.heroCd -= dt;
     const target = this.nearestEnemy(this.heroPos.x, this.heroPos.z, PLAYER.range);
@@ -470,9 +520,19 @@ export class Run {
     if (target) {
       face = Math.atan2(target.x - this.heroPos.x, target.z - this.heroPos.z);
       if (this.heroCd <= 0) {
-        this.heroCd = PLAYER.fireDelay;
+        this.heroCd = PLAYER.fireDelay * this.stats.fireDelay;
         rig.muzzle.getWorldPosition(v1);
-        this.fire(v1, target, this.heroDamage);
+        // Volley: extra bolts go to the next-nearest goblins.
+        const hit = new Set<Enemy>();
+        let t: Enemy | null = target;
+        for (let k = 0; k <= this.stats.multishot && t; k++) {
+          hit.add(t);
+          const crit = Math.random() < this.stats.crit;
+          const dmg = Math.round(this.heroDamage * (crit ? 2 : 1));
+          this.fire(v1, t, dmg, true, crit);
+          t = this.nearestExcept(this.heroPos.x, this.heroPos.z, PLAYER.range, hit);
+        }
+        this.fx.p.muzzle(v1);
         this.sfx.shoot();
       }
     }
@@ -486,16 +546,44 @@ export class Run {
     rig.body.position.y = Math.abs(sw) * 0.06;
     rig.body.rotation.z = sw * 0.04;
 
-    if (this.time - this.heroLastHit > 3) this.heroHp = Math.min(PLAYER.maxHp, this.heroHp + PLAYER.regen * dt);
+    if (this.time - this.heroLastHit > 3) this.heroHp = Math.min(this.stats.maxHp, this.heroHp + PLAYER.regen * dt);
     this.heroHurt = Math.max(0, this.heroHurt - dt * 4);
     M.MAT.team.emissive.setRGB(this.heroHurt * 0.8, 0, 0);
-    const frac = this.heroHp / PLAYER.maxHp;
+    const frac = this.heroHp / this.stats.maxHp;
     this.hud.placeBar(this.heroBar, frac < 0.999 ? v1.copy(this.heroPos).setY(2.7) : null, frac);
   }
 
   get heroDamage() {
     const forge = this.shops.get('forge');
-    return PLAYER.baseDamage + (forge ? forge.level * 8 : 0);
+    return Math.round((PLAYER.baseDamage + (forge ? forge.level * 8 : 0)) * this.stats.damage);
+  }
+
+  private nearestExcept(x: number, z: number, range: number, skip: Set<Enemy>) {
+    let best: Enemy | null = null;
+    let bd = range * range;
+    for (const e of this.enemies) {
+      if (!e.alive || skip.has(e)) continue;
+      const d = (e.x - x) ** 2 + (e.z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+
+  /** Apply a level-up pick. */
+  applyPerk(p: Perk) {
+    this.perkLevels[p.id] = (this.perkLevels[p.id] ?? 0) + 1;
+    const hpFrac = this.heroHp / this.stats.maxHp;
+    p.apply(this.stats);
+    this.heroHp = p.id === 'vigor' ? this.stats.maxHp : hpFrac * this.stats.maxHp;
+    this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
+    this.fx.p.levelUp(v1.copy(this.heroPos).setY(0.4));
+    this.fx.pillar(this.heroPos, 0xffd34d, 1.6, 1.1);
+    this.fx.ring(this.heroPos, 0xffd34d, 7, 0.7);
+    this.fx.text(v1.copy(this.heroPos).setY(3.2), p.name + '!', 'good');
+    this.sfx.levelUp();
   }
 
   /** Keeps a walker out of the hall and building footprints. */
@@ -521,10 +609,11 @@ export class Run {
     this.heroHurt = 1;
     this.heroLastHit = this.time;
     this.sfx.hurt();
+    this.events.hurt(0.45);
     if (this.heroHp <= 0) {
       this.heroAlive = false;
       this.respawnT = PLAYER.respawnTime;
-      this.fx.burst(v1.copy(this.heroPos).setY(1), COLORS.team, 20, 5);
+      this.fx.p.death(v1.copy(this.heroPos).setY(1), COLORS.team, true);
       this.fx.shake = Math.max(this.fx.shake, 0.6);
       this.events.haptic(true);
       this.hud.banner('Knocked out!', true);
@@ -750,7 +839,7 @@ export class Run {
       if (!blocked && e.s >= road.length - 0.3) {
         this.damageHall(t.damage * 3);
         e.alive = false;
-        this.fx.burst(v1.set(e.x, 1, e.z), COLORS.wood, 6, 3);
+        this.fx.p.explosion(v1.set(e.x, 1, e.z));
         continue;
       }
 
@@ -840,37 +929,152 @@ export class Run {
     }
   }
 
-  private hitEnemy(e: Enemy, dmg: number) {
+  private hitEnemy(e: Enemy, dmg: number, crit = false) {
     if (!e.alive) return;
     e.hp -= dmg;
     e.flash = 1;
-    this.fx.text(v1.set(e.x, e.type.boss ? 3.0 : 1.7, e.z), `-${dmg}`, dmg >= 45 ? 'crit' : '');
+    // Small knockback up the road (bosses shrug it off).
+    if (!e.type.boss) e.s = Math.max(0, e.s - 0.12);
+    v1.set(e.x, e.type.boss ? 2.2 : 1.0, e.z);
+    if (crit) this.fx.p.crit(v1);
+    else this.fx.p.hit(v1, e.kind === 'troll' ? 0xc9d4de : 0xb7ff7a);
+    this.fx.text(v1.set(e.x, e.type.boss ? 3.0 : 1.7, e.z), crit ? `${dmg}!` : `-${dmg}`, crit ? 'crit' : '');
     this.sfx.hit();
-    if (e.hp <= 0) {
-      e.alive = false;
-      v1.set(e.x, 0.8, e.z);
-      this.fx.burst(v1, e.kind === 'troll' ? COLORS.troll : COLORS.goblin, e.type.boss ? 30 : 7, e.type.boss ? 6 : 4, e.type.boss ? 1.6 : 1);
-      this.sfx.pop();
-      let coins = Math.floor(e.type.coin);
-      if (Math.random() < e.type.coin - coins) coins++;
-      for (let i = 0; i < coins; i++) this.dropCoin(v1, e.type.boss ? 4 : 1.6);
-      if (e.type.boss) {
-        this.fx.shake = Math.max(this.fx.shake, 0.8);
-        this.events.haptic(true);
-        this.hud.banner('Troll slain!', false);
+    if (e.hp <= 0) this.killEnemy(e);
+  }
+
+  private killEnemy(e: Enemy) {
+    e.alive = false;
+    this.kills++;
+    v1.set(e.x, 0.8, e.z);
+    this.fx.p.death(v1, e.kind === 'troll' ? COLORS.troll : COLORS.goblin, e.type.boss);
+    this.sfx.pop();
+    let coins = Math.floor(e.type.coin);
+    if (Math.random() < e.type.coin - coins) coins++;
+    if (Math.random() < this.stats.greed) coins++;
+    for (let i = 0; i < coins; i++) this.dropCoin(v1, e.type.boss ? 4 : 1.6);
+
+    // XP and level-ups.
+    this.xp += e.type.boss ? 20 : 1;
+    while (this.xp >= xpForLevel(this.level)) {
+      this.xp -= xpForLevel(this.level);
+      this.level++;
+      this.pendingLevelUps++;
+    }
+    this.hud.setXp(this.level, this.xp / xpForLevel(this.level));
+
+    // Kill streaks.
+    this.combo = this.time - this.lastKill < 1.6 ? this.combo + 1 : 1;
+    this.lastKill = this.time;
+    this.bestCombo = Math.max(this.bestCombo, this.combo);
+    this.hud.setCombo(this.combo);
+    const milestones: Record<number, string> = { 15: 'Killing spree!', 30: 'Rampage!', 60: 'Unstoppable!', 100: 'Legendary!', 150: 'Godlike!' };
+    if (milestones[this.combo]) {
+      this.hud.banner(milestones[this.combo], false);
+      const bonus = Math.round(this.combo / 3);
+      for (let i = 0; i < bonus; i++) this.dropCoin(v2.copy(this.heroPos).setY(2.5), 3);
+      this.fx.p.coinBurst(v2.copy(this.heroPos).setY(2));
+      this.fx.ring(this.heroPos, 0xffd34d, 6);
+      this.sfx.treasure();
+      this.events.haptic(false);
+    }
+
+    if (e.type.boss) {
+      this.fx.shake = Math.max(this.fx.shake, 0.9);
+      this.fx.punch = 1;
+      this.hitstop = 0.18;
+      this.events.haptic(true);
+      this.events.flash(0.6);
+      this.fx.ring(v1, 0xffffff, 6, 0.5);
+      this.hud.banner('Troll slain!', false);
+      this.spawnChest(v1);
+    }
+  }
+
+  // ------------------------------------------------------------------ chests
+
+  private spawnChest(at: THREE.Vector3) {
+    const root = new THREE.Group();
+    const k = new M.Kit();
+    k.box(1.1, 0.6, 0.75, COLORS.wood, 0, 0.3, 0);
+    k.box(1.16, 0.1, 0.8, COLORS.coin, 0, 0.12, 0);
+    k.box(1.16, 0.1, 0.8, COLORS.coin, 0, 0.52, 0);
+    k.box(0.12, 0.64, 0.8, COLORS.coin, -0.45, 0.32, 0);
+    k.box(0.12, 0.64, 0.8, COLORS.coin, 0.45, 0.32, 0);
+    root.add(k.mesh());
+    const lid = new THREE.Group();
+    const lk = new M.Kit();
+    lk.add(new THREE.CylinderGeometry(0.38, 0.38, 1.1, 12, 1, false, 0, Math.PI), COLORS.woodLight, 0, 0, 0.38, 0, 0, Math.PI / 2);
+    lk.box(0.14, 0.12, 0.2, COLORS.coin, 0, 0.0, 0.78);
+    lid.add(lk.mesh());
+    lid.position.set(0, 0.6, -0.38);
+    root.add(lid);
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.9, 7, 16, 1, true).translate(0, 3.5, 0),
+      new THREE.MeshBasicMaterial({ color: 0xffd34d, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthWrite: false }),
+    );
+    root.add(beam);
+    root.position.set(at.x, 0, at.z);
+    this.root.add(root);
+    this.chests.push({ root, lid, pos: new THREE.Vector3(at.x, 0, at.z), vy: 7, y: 0.01, open: 0, gold: 20 + this.wave * 4, beam });
+    this.hud.hint('A treasure chest! Go grab it');
+  }
+
+  private updateChests(dt: number) {
+    for (let i = this.chests.length - 1; i >= 0; i--) {
+      const c = this.chests[i];
+      // Pops up out of the troll, then bounces.
+      if (c.y > 0 || c.vy > 0) {
+        c.vy -= 20 * dt;
+        c.y = Math.max(0, c.y + c.vy * dt);
+        if (c.y === 0 && c.vy < 0) c.vy = Math.abs(c.vy) > 3 ? -c.vy * 0.35 : 0;
+      }
+      c.root.position.y = c.y;
+      if (c.open === 0) {
+        c.root.rotation.y += dt * 0.8;
+        (c.beam.material as THREE.MeshBasicMaterial).opacity = 0.22 + Math.sin(this.time * 5) * 0.08;
+        if (Math.random() < dt * 6) this.fx.p.sparkle(v1.copy(c.pos).setY(0.8 + Math.random()), 0xffe066);
+        if (this.heroAlive && Math.hypot(this.heroPos.x - c.pos.x, this.heroPos.z - c.pos.z) < 2) {
+          c.open = 0.001;
+          this.fx.p.coinBurst(v1.copy(c.pos).setY(1));
+          this.fx.pillar(c.pos, 0xffd34d, 1.4, 1);
+          this.fx.ring(c.pos, 0xffd34d, 6);
+          this.fx.punch = 0.7;
+          this.hitstop = 0.1;
+          this.events.flash(0.4);
+          this.events.haptic(true);
+          this.sfx.treasure();
+          this.hud.banner(`+${c.gold * coinValue(this.wave)} gold!`, false);
+          for (let n = 0; n < c.gold; n++) this.dropCoin(v1.copy(c.pos).setY(1.2), 4.5);
+        }
+      } else {
+        c.open += dt;
+        c.lid.rotation.x = -Math.min(1, c.open * 4) * 1.9;
+        (c.beam.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.3 - c.open * 0.3);
+        if (c.open > 2.5) {
+          c.root.scale.setScalar(Math.max(0.01, 1 - (c.open - 2.5) * 3));
+          if (c.open > 2.85) {
+            this.root.remove(c.root);
+            c.beam.geometry.dispose();
+            (c.beam.material as THREE.Material).dispose();
+            this.chests.splice(i, 1);
+          }
+        }
       }
     }
   }
 
   // ------------------------------------------------------------------ projectiles
 
-  private fire(from: THREE.Vector3, target: Enemy, damage: number) {
+  private fire(from: THREE.Vector3, target: Enemy, damage: number, hero = false, crit = false) {
     const a = this.arrows.find((q) => !q.active);
     if (!a) {
-      this.hitEnemy(target, damage);
+      this.hitEnemy(target, damage, crit);
       return;
     }
     a.active = true;
+    a.hero = hero;
+    a.crit = crit;
     a.mesh.visible = true;
     a.pos.copy(from);
     a.target = target;
@@ -890,12 +1094,42 @@ export class Run {
       if (d <= step + 0.15) {
         a.active = false;
         a.mesh.visible = false;
-        if (a.target?.alive) this.hitEnemy(a.target, a.damage);
+        if (a.target?.alive) {
+          const t = a.target;
+          this.hitEnemy(t, a.damage, a.crit);
+          if (a.hero) this.heroHitEffects(t, a.damage);
+        }
         continue;
       }
       a.pos.addScaledVector(v1, step / d);
       a.mesh.position.copy(a.pos);
       a.mesh.lookAt(a.aim);
+      this.fx.p.trail(a.pos, a.hero ? (this.stats.splash ? 0xff8a2e : this.stats.chain ? 0x8fe3ff : 0xffd86b) : 0xfff3d0, a.hero ? 0.28 : 0.18);
+    }
+  }
+
+  /** Perk effects that ride on the hero's bolts. */
+  private heroHitEffects(t: Enemy, dmg: number) {
+    const at = v2.set(t.x, 0.9, t.z);
+    if (this.stats.splash > 0) {
+      this.fx.p.explosion(at);
+      const r2 = 1.9 * 1.9;
+      for (const e of this.enemies) {
+        if (e === t || !e.alive) continue;
+        if ((e.x - t.x) ** 2 + (e.z - t.z) ** 2 < r2) this.hitEnemy(e, Math.max(1, Math.round(dmg * this.stats.splash)));
+      }
+    }
+    if (this.stats.chain > 0 && Math.random() < 0.45) {
+      const hit = new Set<Enemy>([t]);
+      let from = t;
+      for (let i = 0; i < this.stats.chain; i++) {
+        const next = this.nearestExcept(from.x, from.z, 4.5, hit);
+        if (!next) break;
+        hit.add(next);
+        this.fx.p.zap(v1.set(from.x, 1, from.z), v3.set(next.x, 1, next.z));
+        this.hitEnemy(next, Math.round(dmg * 0.6));
+        from = next;
+      }
     }
   }
 
@@ -920,11 +1154,12 @@ export class Run {
       b.pos.y = Math.max(0.9, b.pos.y - dt * 4);
       b.left -= step;
       b.mesh.position.copy(b.pos);
+      this.fx.p.trail(b.pos, 0xffe3a0, 0.5);
       for (const e of this.enemies) {
         if (!e.alive || b.hits.has(e)) continue;
         if ((e.x - b.pos.x) ** 2 + (e.z - b.pos.z) ** 2 < (e.type.radius + 0.5) ** 2) {
           b.hits.add(e);
-          this.hitEnemy(e, BALLISTA.damage);
+          this.hitEnemy(e, Math.round(BALLISTA.damage * this.stats.allies));
           if (b.hits.size >= BALLISTA.pierce) b.left = 0;
         }
       }
@@ -955,16 +1190,19 @@ export class Run {
       } else {
         c.mesh.rotation.x = 0;
         c.mesh.rotation.y += dt * 2;
+        if (Math.random() < dt * 0.8) this.fx.p.sparkle(v1.copy(p).setY(0.3), 0xffe066);
       }
       if (!this.heroAlive || c.age < 0.35) continue;
       const dx = p.x - this.heroPos.x;
       const dz = p.z - this.heroPos.z;
       // Nearby coins snap to the hero; forgotten ones fly over on their own after a while.
       const far = c.age > PLAYER.coinAutoCollect;
-      if (far || dx * dx + dz * dz < PLAYER.magnet * PLAYER.magnet) {
+      const mag = PLAYER.magnet * this.stats.magnet;
+      if (far || dx * dx + dz * dz < mag * mag) {
         c.active = false;
         c.mesh.visible = false;
-        this.fx.fly(p.clone(), () => this.stackTop(v3), far ? 0.7 : 0.28, far ? 3 : 1.2, () => this.gainCoin());
+        const value = c.value;
+        this.fx.fly(p.clone(), () => this.stackTop(v3), far ? 0.7 : 0.28, far ? 3 : 1.2, () => this.gainCoin(value));
       }
     }
   }
@@ -1004,15 +1242,18 @@ export class Run {
       this.payStreak += dt;
       const rate = Math.min(45, 7 + this.payStreak * 26);
       this.payT += dt * rate;
+      // Big costs move in bigger chunks so nothing takes more than a couple of seconds.
+      const chunk = Math.max(1, Math.floor(on.cost / 35));
       while (this.payT >= 1 && this.carry > 0 && on.paid + on.pending < on.cost) {
         this.payT -= 1;
-        this.carry--;
-        on.pending++;
+        const amt = Math.min(chunk, this.carry, on.cost - on.paid - on.pending);
+        this.carry -= amt;
+        on.pending += amt;
         const plot = on;
         const from = this.stackTop(new THREE.Vector3());
         this.fx.fly(from, () => v3.set(plot.pos.x, 0.2, plot.pos.z), 0.22, 1.0, () => {
-          plot.pending--;
-          plot.paid++;
+          plot.pending -= amt;
+          plot.paid += amt;
           plot.bump();
           this.sfx.pay(plot.paid / Math.max(1, plot.cost));
           if (plot.paid >= plot.cost) this.completePlot(plot);
@@ -1028,8 +1269,13 @@ export class Run {
     p.paid = 0;
     this.sfx.build();
     this.events.haptic(false);
-    this.fx.burst(v1.set(p.pos.x, 0.6, p.pos.z), COLORS.coin, 16, 5);
-    this.fx.shake = Math.max(this.fx.shake, 0.2);
+    v1.set(p.pos.x, 0.6, p.pos.z);
+    this.fx.p.build(v1);
+    this.fx.ring(v1, 0xffe08a, 5, 0.6);
+    this.fx.pillar(v1, 0xfff0b0, 1.3, 0.8);
+    this.fx.shake = Math.max(this.fx.shake, 0.25);
+    this.fx.punch = Math.max(this.fx.punch, 0.5);
+    this.events.flash(0.25);
 
     switch (def.kind) {
       case 'tower':
@@ -1129,7 +1375,7 @@ export class Run {
     b.hp = b.maxHp;
     b.rise = 0;
     b.mesh.visible = true;
-    this.fx.burst(v2.copy(b.pos).setY(0.5), COLORS.wood, 14, 4);
+    this.fx.p.build(v2.copy(b.pos).setY(0.5));
   }
 
   private buildShop(p: Plot, kind: Workshop['kind'], lvl: number) {
@@ -1189,7 +1435,8 @@ export class Run {
     this.setTier(u, 0);
     this.units.push(u);
     if (home) this.assign(u, home);
-    this.fx.burst(v1.copy(pos).setY(0.8), COLORS.team, 10, 3);
+    this.fx.p.levelUp(v1.copy(pos).setY(0.3));
+    this.fx.ring(pos, 0x6fb6ff, 3, 0.5);
     return u;
   }
 
@@ -1320,7 +1567,7 @@ export class Run {
           if (u.cd <= 0 && u.state !== 'walk') {
             u.cd = ARCHER.delay;
             u.rig.muzzle.getWorldPosition(v2);
-            this.fire(v2, t, BOW_TIERS[u.tier].damage);
+            this.fire(v2, t, Math.round(BOW_TIERS[u.tier].damage * this.stats.allies));
             this.sfx.turret();
           }
         }
@@ -1331,7 +1578,8 @@ export class Run {
           if (u.cd <= 0) {
             u.cd = KNIGHT.delay;
             u.swing = 1;
-            this.hitEnemy(t, SWORD_TIERS[u.tier].damage);
+            this.hitEnemy(t, Math.round(SWORD_TIERS[u.tier].damage * this.stats.allies));
+            this.fx.p.hit(v2.set(t.x, 1, t.z), 0xffffff);
           }
         } else if (u.state === 'station' && u.home && !('rig' in u.home)) {
           // Face up the road toward the incoming horde.
@@ -1375,7 +1623,7 @@ export class Run {
     u.hp -= dmg;
     u.lastHit = this.time;
     if (u.hp <= 0) {
-      this.fx.burst(v1.copy(u.pos).setY(0.8), COLORS.team, 14, 4);
+      this.fx.p.death(v1.copy(u.pos).setY(0.8), COLORS.team);
       this.fx.text(v1.copy(u.pos).setY(2), 'Knight fell!', 'hurt');
     }
   }
@@ -1426,6 +1674,7 @@ export class Run {
       b.alive = false;
       b.mesh.visible = false;
       this.fx.burst(v1.copy(b.pos).setY(0.6), COLORS.wood, 22, 5);
+      this.fx.p.explosion(v1);
       this.sfx.pop();
     }
   }
@@ -1447,11 +1696,12 @@ export class Run {
     for (const s of this.shops.values()) {
       if (s.rig.anim) s.rig.anim.rotation.z = Math.sin(this.time * 9) * 0.7;
       if (s.kind !== 'forge' && s.kind !== 'bowyer') continue;
+      if (s.kind === 'forge' && Math.random() < dt * 8) this.fx.p.embers(v1.set(s.pos.x, 1.0, s.pos.z + 1.3));
       if (s.rig.chimney) {
         s.smokeT -= dt;
         if (s.smokeT <= 0) {
           s.smokeT = 0.35;
-          this.fx.smoke(v1.copy(s.rig.chimney).add(s.pos));
+          this.fx.p.smoke(v1.copy(s.rig.chimney).add(s.pos));
         }
       }
       if (s.rack.length < WORKSHOP.rackMax) {
@@ -1460,7 +1710,7 @@ export class Run {
         if (s.timer >= interval) {
           s.timer = 0;
           s.rack.push(s.level);
-          this.fx.burst(v1.copy(s.rackWorld).setY(1), s.kind === 'forge' ? COLORS.fire : COLORS.wood, 5, 2);
+          this.fx.p.sparkle(v1.copy(s.rackWorld).setY(1), s.kind === 'forge' ? 0xffb347 : 0xfff3c0, 6);
         }
       }
       // Draw the rack.
@@ -1518,7 +1768,8 @@ export class Run {
         this.setTier(unit, Math.max(unit.tier, w.tier));
         const tiers = unit.type === 'archer' ? BOW_TIERS : SWORD_TIERS;
         this.fx.text(v1.copy(unit.pos).setY(unit.pos.y + 2.2), tiers[w.tier].name + '!', 'good');
-        this.fx.burst(v1.copy(unit.pos).setY(unit.pos.y + 1), tiers[w.tier].color, 10, 3);
+        this.fx.p.levelUp(v1.copy(unit.pos).setY(unit.pos.y + 0.6));
+        this.fx.ring(v1.copy(unit.pos), tiers[w.tier].color, 3, 0.5);
         this.sfx.build();
       });
       return;
@@ -1530,13 +1781,15 @@ export class Run {
   private damageHall(dmg: number) {
     this.hallHp -= dmg;
     this.hallLastHit = this.time;
-    this.fx.burst(v1.set((Math.random() - 0.5) * 3, 2, (Math.random() - 0.5) * 3), COLORS.wood, 4, 3);
+    this.fx.p.explosion(v1.set((Math.random() - 0.5) * 3, 2, (Math.random() - 0.5) * 3));
+    this.events.hurt(0.25);
     this.fx.shake = Math.max(this.fx.shake, 0.15);
     if (this.hallHp <= 0 && !this.over) {
       this.hallHp = 0;
       this.over = true;
       this.sfx.boom();
-      this.fx.burst(v1.set(0, 2, 0), COLORS.fire, 60, 9, 2);
+      this.fx.p.explosion(v1.set(0, 2, 0));
+      this.fx.p.build(v1);
       this.fx.shake = 1.5;
       this.events.haptic(true);
       this.events.onGameOver(this.wave);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GEO, MAT } from './models';
+import { Particles } from './particles';
 
 // Juice: particles, flying coins, floating damage numbers.
 
@@ -32,9 +33,25 @@ interface FloatText {
   active: boolean;
 }
 
+interface Pulse {
+  mesh: THREE.Mesh;
+  mat: THREE.MeshBasicMaterial;
+  t: number;
+  dur: number;
+  kind: 'ring' | 'pillar';
+  size: number;
+  active: boolean;
+}
+
 const tmp = new THREE.Vector3();
+const RING_GEO = new THREE.RingGeometry(0.82, 1, 48).rotateX(-Math.PI / 2);
+const PILLAR_GEO = new THREE.CylinderGeometry(1, 1, 1, 24, 1, true).translate(0, 0.5, 0);
 
 export class Fx {
+  readonly p: Particles;
+  private pulses: Pulse[] = [];
+  /** Brief zoom-in "punch" for big moments; the camera reads and decays it. */
+  punch = 0;
   private particles: Particle[] = [];
   private flyers: Flyer[] = [];
   private texts: FloatText[] = [];
@@ -45,6 +62,21 @@ export class Fx {
     scene: THREE.Scene,
     layer: HTMLElement,
   ) {
+    this.p = new Particles(scene);
+    for (let i = 0; i < 16; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      });
+      const mesh = new THREE.Mesh(RING_GEO, mat);
+      mesh.visible = false;
+      mesh.renderOrder = 8;
+      scene.add(mesh);
+      this.pulses.push({ mesh, mat, t: 0, dur: 1, kind: 'ring', size: 1, active: false });
+    }
     for (let i = 0; i < 220; i++) {
       const mesh = new THREE.Mesh(GEO.particle, MAT.arrow);
       mesh.visible = false;
@@ -149,7 +181,49 @@ export class Fx {
     t.el.className = `float-text show ${cls}`;
   }
 
+  /** Expanding glow ring on the ground. */
+  ring(pos: THREE.Vector3, color: number, size = 4, dur = 0.6) {
+    this.pulse('ring', pos, color, size, dur);
+  }
+
+  /** Column of light shooting up from the ground. */
+  pillar(pos: THREE.Vector3, color: number, size = 1.4, dur = 0.9) {
+    this.pulse('pillar', pos, color, size, dur);
+  }
+
+  private pulse(kind: Pulse['kind'], pos: THREE.Vector3, color: number, size: number, dur: number) {
+    const q = this.pulses.find((x) => !x.active) ?? this.pulses[0];
+    q.active = true;
+    q.kind = kind;
+    q.t = 0;
+    q.dur = dur;
+    q.size = size;
+    q.mat.color.set(color);
+    q.mesh.geometry = kind === 'ring' ? RING_GEO : PILLAR_GEO;
+    q.mesh.position.set(pos.x, 0.08, pos.z);
+    q.mesh.visible = true;
+  }
+
   update(dt: number, camera: THREE.Camera, w: number, h: number) {
+    this.p.update(dt);
+    this.punch = Math.max(0, this.punch - dt * 3);
+    for (const q of this.pulses) {
+      if (!q.active) continue;
+      q.t += dt / q.dur;
+      if (q.t >= 1) {
+        q.active = false;
+        q.mesh.visible = false;
+        continue;
+      }
+      const e = 1 - (1 - q.t) ** 3;
+      if (q.kind === 'ring') {
+        q.mesh.scale.setScalar(0.3 + e * q.size);
+        q.mat.opacity = (1 - q.t) * 0.75;
+      } else {
+        q.mesh.scale.set(q.size * 0.45 * (1 - q.t * 0.7), 2 + e * 9, q.size * 0.45 * (1 - q.t * 0.7));
+        q.mat.opacity = Math.sin(q.t * Math.PI) * 0.22;
+      }
+    }
     for (const p of this.particles) {
       if (!p.active) continue;
       p.life -= dt;
@@ -186,6 +260,7 @@ export class Fx {
       f.mesh.position.lerpVectors(f.from, to, e);
       f.mesh.position.y += Math.sin(f.t * Math.PI) * f.arc;
       f.mesh.rotation.y += dt * 10;
+      if (Math.random() < 0.45) this.p.trail(f.mesh.position, 0xffd34d, 0.28);
     }
 
     for (const t of this.texts) {
@@ -208,6 +283,11 @@ export class Fx {
   }
 
   clear() {
+    this.p.clear();
+    for (const q of this.pulses) {
+      q.active = false;
+      q.mesh.visible = false;
+    }
     for (const p of this.particles) {
       p.active = false;
       p.mesh.visible = false;

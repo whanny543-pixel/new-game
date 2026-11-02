@@ -513,3 +513,291 @@ h2 {
     border-color: #fff;
   }
 }
+
+/* ------------------------------------------------------------- XP, combo */
+
+.xp {
+  position: absolute;
+  top: calc(var(--safe-top) + 58px);
+  left: 12px;
+  right: 64px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.xp-badge {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff1a8, #ffc928 50%, #c98a00);
+  border: 3px solid #5a3a00;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), 0 0 14px rgba(255, 201, 40, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 0.9;
+  color: #4a2a00;
+}
+.xp-badge small {
+  font-size: 8px;
+}
+.xp-badge b {
+  font-size: 15px;
+}
+.xp-bar {
+  flex: 1;
+  max-width: 220px;
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(43, 29, 18, 0.7);
+  border: 2px solid rgba(255, 244, 214, 0.25);
+  overflow: hidden;
+}
+.xp-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #6fd3ff, #b48bff);
+  box-shadow: 0 0 10px #8fd3ff;
+  transition: width 0.25s ease-out;
+}
+
+#combo {
+  position: absolute;
+  right: 14px;
+  top: 38%;
+  text-align: right;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 0.3s,
+    transform 0.3s;
+  pointer-events: none;
+}
+#combo.show {
+  opacity: 1;
+  transform: scale(1);
+}
+#combo span {
+  display: block;
+  font-size: 38px;
+  color: #fff4d6;
+  -webkit-text-stroke: 2px #2b1d12;
+  text-shadow: 0 4px 0 #2b1d12;
+}
+#combo small {
+  font-size: 15px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ffc928;
+  text-shadow: 0 2px 0 #2b1d12;
+}
+#combo.hot span {
+  color: #ffb13b;
+  text-shadow:
+    0 4px 0 #2b1d12,
+    0 0 18px #ff7a1a;
+}
+#combo.pop span {
+  animation: comboPop 0.22s ease-out;
+}
+@keyframes comboPop {
+  0% {
+    transform: scale(1.45) rotate(-6deg);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.float-text.show {
+  animation: textPop 0.8s ease-out;
+}
+@keyframes textPop {
+  0% {
+    font-size: 8px;
+  }
+  15% {
+    font-size: 30px;
+  }
+  30% {
+    font-size: 22px;
+  }
+}
+.float-text.crit.show {
+  animation: critPop 0.8s ease-out;
+}
+@keyframes critPop {
+  0% {
+    font-size: 10px;
+  }
+  15% {
+    font-size: 44px;
+  }
+  35% {
+    font-size: 32px;
+  }
+}
+.float-text.crit {
+  color: #ffd84a;
+  -webkit-text-stroke-color: #6a2a00;
+  text-shadow:
+    0 2px 0 #6a2a00,
+    0 0 12px rgba(255, 170, 0, 0.8);
+}
+
+.pill.gold {
+  box-shadow: 0 0 0 rgba(255, 201, 40, 0);
+  transition:
+    transform 0.08s,
+    box-shadow 0.15s;
+}
+.pill.gold.bump {
+  box-shadow: 0 0 18px rgba(255, 201, 40, 0.8);
+}
+.coin {
+  box-shadow: 0 0 10px rgba(255, 201, 40, 0.7);
+}
+
+#banner {
+  background: linear-gradient(90deg, transparent, rgba(43, 29, 18, 0.65) 20%, rgba(43, 29, 18, 0.65) 80%, transparent);
+  padding: 8px 0 12px;
+}
+
+/* ------------------------------------------------------------- Level-up cards */
+
+#perks {
+  background: radial-gradient(ellipse at center, rgba(255, 196, 64, 0.25), rgba(20, 12, 6, 0.88) 70%);
+  z-index: 5;
+}
+.perks-wrap {
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+}
+.perks-kicker {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #ffc928;
+  animation: kicker 1.2s ease-in-out infinite;
+}
+@keyframes kicker {
+  50% {
+    text-shadow: 0 0 16px #ffc928;
+  }
+}
+.perks-sub {
+  margin: 0 0 14px;
+  color: #f1e3c4;
+}
+#perk-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.perk {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font);
+  color: #fff;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 3px solid #2b1d12;
+  background: linear-gradient(#6b4a2b, #47301a);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.12),
+    0 6px 0 rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  position: relative;
+  animation: cardIn 0.4s cubic-bezier(0.2, 1.5, 0.4, 1) backwards;
+}
+.perk:active {
+  transform: translateY(3px) scale(0.98);
+}
+.perk.rare {
+  background: linear-gradient(#2f5fb8, #1d3c7a);
+  box-shadow:
+    inset 0 0 0 2px rgba(143, 211, 255, 0.4),
+    0 6px 0 rgba(0, 0, 0, 0.4),
+    0 0 18px rgba(80, 160, 255, 0.45);
+}
+.perk.epic {
+  background: linear-gradient(#7a3fc0, #4a1f80);
+  box-shadow:
+    inset 0 0 0 2px rgba(220, 180, 255, 0.5),
+    0 6px 0 rgba(0, 0, 0, 0.4),
+    0 0 24px rgba(180, 110, 255, 0.6);
+}
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.85);
+  }
+}
+.perk-ico {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.perk-ico svg {
+  width: 32px;
+  height: 32px;
+  fill: #ffd34d;
+  stroke: #ffd34d;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.perk-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.perk-name {
+  font-size: 21px;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
+}
+.perk-name em {
+  font-style: normal;
+  font-size: 14px;
+  color: #ffd34d;
+  margin-left: 4px;
+}
+.perk-desc {
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+  color: #f1e3c4;
+}
+.perk-tag {
+  position: absolute;
+  top: -9px;
+  right: 12px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: #2b1d12;
+  color: #d8c8a8;
+}
+.perk.rare .perk-tag {
+  color: #8fd3ff;
+}
+.perk.epic .perk-tag {
+  color: #e2b8ff;
+}

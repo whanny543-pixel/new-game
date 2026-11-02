@@ -4,11 +4,14 @@ import { Sfx } from './audio';
 import { Fx } from './fx';
 import { Hud } from './hud';
 import { Input } from './input';
+import { makeEnvironment } from './materials';
+import { rollPerks } from './perks';
+import { Renderer } from './render';
 import { Run } from './run';
 import { World } from './world';
 import './style.css';
 
-type State = 'menu' | 'playing' | 'paused' | 'over';
+type State = 'menu' | 'playing' | 'paused' | 'levelup' | 'over';
 
 const BEST_KEY = 'hearthguard.bestWave';
 const MUTE_KEY = 'hearthguard.muted';
@@ -30,7 +33,7 @@ function save(key: string, value: string) {
 
 class Game {
   private canvas = document.getElementById('c') as HTMLCanvasElement;
-  private renderer: THREE.WebGLRenderer;
+  private renderer: Renderer;
   private scene = new THREE.Scene();
   private camera = new THREE.PerspectiveCamera(40, 1, 0.5, 160);
   private camFocus = new THREE.Vector3(0, 0, 2);
@@ -50,13 +53,9 @@ class Game {
 
   constructor() {
     const mobile = matchMedia('(pointer: coarse)').matches;
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobile ? 2 : 1.75));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.95;
+    this.renderer = new Renderer(this.canvas);
+    this.scene.environment = makeEnvironment(this.renderer.gl);
+    this.scene.environmentIntensity = 0.28;
 
     this.world = new World(this.scene, mobile ? 1024 : 2048);
     this.fx = new Fx(this.scene, document.getElementById('world-ui')!);
@@ -77,7 +76,7 @@ class Game {
       if (document.hidden && this.state === 'playing') this.pause();
     });
 
-    this.renderer.setAnimationLoop(() => this.frame());
+    this.renderer.gl.setAnimationLoop(() => this.frame());
   }
 
   private bindUi() {
@@ -134,6 +133,8 @@ class Game {
       haptic: (strong) => {
         Haptics.impact({ style: strong ? ImpactStyle.Heavy : ImpactStyle.Light }).catch(() => {});
       },
+      hurt: (a) => (this.renderer.hurt = Math.max(this.renderer.hurt, a)),
+      flash: (a) => (this.renderer.flash = Math.max(this.renderer.flash, a)),
     });
     this.camFocus.copy(this.run.heroPos);
   }
@@ -184,42 +185,83 @@ class Game {
     const app = document.getElementById('app')!;
     this.w = app.clientWidth;
     this.h = app.clientHeight;
-    this.renderer.setSize(this.w, this.h, false);
+    this.renderer.resize(this.w, this.h);
     this.camera.aspect = this.w / this.h;
     this.camera.updateProjectionMatrix();
+    this.fx.p.setViewport(this.h * Math.min(window.devicePixelRatio || 1, 2), this.camera.fov);
+  }
+
+  /** Pauses the action and shows the level-up cards, one level at a time. */
+  private offerPerk() {
+    const run = this.run!;
+    this.state = 'levelup';
+    this.input.enabled = false;
+    this.input.release();
+    this.sfx.levelUp();
+    const lvl = run.level - run.pendingLevelUps + 1;
+    const choices = rollPerks(run.perkLevels);
+    if (!choices.length) {
+      run.pendingLevelUps = 0;
+      this.state = 'playing';
+      this.input.enabled = true;
+      return;
+    }
+    this.hud.showPerks(lvl, choices, run.perkLevels, (p) => {
+      run.applyPerk(p);
+      this.renderer.flash = 0.5;
+      this.state = 'playing';
+      this.input.enabled = true;
+      this.clock.getDelta();
+    });
   }
 
   private frame() {
-    const dt = Math.min(this.clock.getDelta(), 1 / 30);
+    const rawDt = Math.min(this.clock.getDelta(), 1 / 20);
     const run = this.run!;
     this.input.update();
 
+    // Hit-stop: big moments freeze the action for a beat.
+    let dt = Math.min(rawDt, 1 / 30);
+    if (run.hitstop > 0) {
+      run.hitstop -= rawDt;
+      dt *= 0.08;
+    }
+
     if (this.state === 'playing') {
       run.update(dt, this.input.move);
+      if (run.pendingLevelUps > 0 && run.hitstop <= 0 && !run.over) this.offerPerk();
     } else if (this.state === 'menu') {
       this.menuT += dt;
     }
 
-    // Camera: fixed three-quarter view following the hero; zooms out as the land grows.
+    // Camera: three-quarter view following the hero with a little look-ahead.
     // Narrower screens need a slightly higher camera to show the same width of the world.
     const aspectZoom = Math.min(1.35, Math.max(1, 0.5 / (this.w / this.h)) * 1.1);
-    const targetZoom = aspectZoom * (this.state === 'menu' ? 1.15 : 1);
+    const targetZoom = aspectZoom * (this.state === 'menu' ? 1.12 : 1);
     this.camZoom += (targetZoom - this.camZoom) * Math.min(1, dt * 2);
-    const follow = this.state === 'menu' ? new THREE.Vector3(Math.sin(this.menuT * 0.2) * 3, 0, 0) : run.heroPos;
-    this.camFocus.lerp(follow, Math.min(1, dt * 5));
+    const zoom = this.camZoom * (1 - this.fx.punch * 0.07);
+    const follow =
+      this.state === 'menu'
+        ? this.look.set(Math.sin(this.menuT * 0.2) * 4, 0, -4 + Math.cos(this.menuT * 0.15) * 3)
+        : this.look.copy(run.heroPos).addScaledVector(run.heroVel, 0.28);
+    this.camFocus.lerp(follow, Math.min(1, dt * 4.5));
     const shake = this.fx.shake;
     this.camera.position.set(
-      this.camFocus.x + (Math.random() - 0.5) * shake * 0.5,
-      30 * this.camZoom,
-      this.camFocus.z + 13.5 * this.camZoom + (Math.random() - 0.5) * shake * 0.5,
+      this.camFocus.x + (Math.random() - 0.5) * shake * 0.6,
+      29 * zoom,
+      this.camFocus.z + 14.5 * zoom + (Math.random() - 0.5) * shake * 0.6,
     );
-    this.camera.lookAt(this.camFocus.x, 0, this.camFocus.z - 1.5);
+    this.camera.lookAt(this.camFocus.x, 0, this.camFocus.z - 1.2);
 
     this.world.update(this.camFocus);
-    if (this.state !== 'paused') this.fx.update(dt, this.camera, this.w, this.h);
-    this.hud.render(dt, this.camera, this.w, this.h);
-    this.renderer.render(this.scene, this.camera);
+    const fxDt = this.state === 'paused' || this.state === 'levelup' ? 0 : dt;
+    this.fx.update(fxDt, this.camera, this.w, this.h);
+    if (this.state === 'menu' && Math.random() < 0.1) this.fx.p.motes(this.camFocus);
+    this.hud.render(rawDt, this.camera, this.w, this.h);
+    this.renderer.render(this.scene, this.camera, fxDt, rawDt);
   }
+
+  private look = new THREE.Vector3();
 }
 
 const game = new Game();

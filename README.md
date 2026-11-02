@@ -9,7 +9,9 @@ Goblin hordes march down winding desert roads toward your town hall. Your hero s
 - **Guard posts** hold the road itself. Recruit knights at the **Barracks** and lead them to a post, where they block and fight the horde.
 - **Barricades** stall the horde until they're smashed (rebuild them for gold).
 - The **Forge** makes swords and the **Bowyer** makes bows. Both stack up on a rack. Pick them up and walk past your knights and archers to hand them over. Upgrading a workshop makes better weapons: Iron → Steel → Gold.
-- A second road opens at wave 7, and a troll boss arrives every 4th wave.
+- A second road opens at wave 7, and a troll boss arrives every 4th wave. Trolls drop treasure chests.
+- **Hero levels:** every kill gives XP. Each level offers three perk cards (Volley, Fire Arrows, Storm Bolts, Keen Eye, War Banner, Golden Touch and more).
+- **Combos:** chain kills quickly for streak bonuses. Coins are worth more as the waves climb.
 
 A dotted trail always points to the most useful next step, and a hint line at the bottom explains it.
 
@@ -47,7 +49,11 @@ Before submitting to the stores:
 | `src/models.ts` | Procedural low-poly models (instanced horde, merged buildings) |
 | `src/world.ts` | Desert terrain, roads, scenery, lighting |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
-| `src/hud.ts`, `src/style.css` | HUD, menus, health bars |
+| `src/perks.ts` | Level-up perk deck |
+| `src/render.ts` | Post-processing: bloom, colour grade, vignette, adaptive quality |
+| `src/materials.ts` | PBR materials with world-space detail texture, baked environment light |
+| `src/particles.ts` | GPU point-sprite particles and effect presets |
+| `src/hud.ts`, `src/style.css` | HUD, menus, health bars, level-up cards |
 | `src/input.ts` | Floating joystick and keyboard |
 | `src/audio.ts` | Synthesized sound effects |
 

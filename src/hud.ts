@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Perk } from './perks';
 
 // DOM overlay: top bar, banners, hints and health bars pinned to world positions.
 
@@ -24,16 +25,68 @@ export class Hud {
   private bars = new Map<HTMLElement, Pinned>();
   private last = { gold: -1, wave: -1, waveP: -1, keep: -1, hint: '' };
   private bannerTimer = 0;
+  private goldShown = 0;
+  private goldTarget = 0;
+  private xpFill = document.getElementById('xp-fill')!;
+  private xpLevel = document.getElementById('xp-level')!;
+  private comboEl = document.getElementById('combo')!;
+  private comboNum = document.getElementById('combo-num')!;
+  private perksEl = document.getElementById('perks')!;
+  private perkCards = document.getElementById('perk-cards')!;
   private bumpTimer = 0;
 
   show(on: boolean) {
     this.root.classList.toggle('hidden', !on);
   }
 
+  /** The counter rolls toward the real value so gains feel like a slot machine. */
   setGold(n: number) {
-    if (n === this.last.gold) return;
-    this.last.gold = n;
-    this.goldEl.textContent = String(n);
+    this.goldTarget = n;
+  }
+
+  setXp(level: number, frac: number) {
+    this.xpFill.style.width = `${Math.min(1, frac) * 100}%`;
+    this.xpLevel.textContent = String(level);
+  }
+
+  setCombo(n: number) {
+    if (n < 3) {
+      this.comboEl.classList.remove('show');
+      return;
+    }
+    this.comboNum.textContent = `×${n}`;
+    this.comboEl.classList.add('show');
+    this.comboEl.classList.remove('pop');
+    void this.comboEl.offsetWidth; // restart the pop animation
+    this.comboEl.classList.add('pop');
+    this.comboEl.classList.toggle('hot', n >= 30);
+  }
+
+  /** Level-up card picker. Calls back with the chosen perk. */
+  showPerks(level: number, perks: Perk[], levels: Record<string, number>, onPick: (p: Perk) => void) {
+    this.perkCards.innerHTML = '';
+    (document.getElementById('perks-level') as HTMLElement).textContent = `Level ${level}`;
+    perks.forEach((p, i) => {
+      const b = document.createElement('button');
+      b.className = `perk ${p.rarity}`;
+      b.style.animationDelay = `${i * 0.08}s`;
+      const lv = levels[p.id] ?? 0;
+      b.innerHTML = `
+        <span class="perk-ico"><svg viewBox="0 0 24 24"><path d="${p.icon}"/></svg></span>
+        <span class="perk-text">
+          <span class="perk-name">${p.name}${lv ? ` <em>${lv + 1}</em>` : ''}</span>
+          <span class="perk-desc">${p.desc(lv)}</span>
+        </span>
+        <span class="perk-tag">${p.rarity}</span>`;
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.perksEl.classList.add('hidden');
+        onPick(p);
+      });
+      this.perkCards.appendChild(b);
+    });
+    this.perksEl.classList.remove('hidden');
   }
 
   bumpGold() {
@@ -135,6 +188,12 @@ export class Hud {
       this.bannerTimer -= dt;
       if (this.bannerTimer <= 0) this.bannerEl.className = '';
     }
+    if (this.goldShown !== this.goldTarget) {
+      const diff = this.goldTarget - this.goldShown;
+      const step = Math.sign(diff) * Math.max(1, Math.ceil(Math.abs(diff) * Math.min(1, dt * 12)));
+      this.goldShown = Math.abs(step) >= Math.abs(diff) ? this.goldTarget : this.goldShown + step;
+      this.goldEl.textContent = String(this.goldShown);
+    }
     if (this.bumpTimer > 0) {
       this.bumpTimer -= dt;
       if (this.bumpTimer <= 0) this.goldPill.classList.remove('bump');
@@ -144,6 +203,11 @@ export class Hud {
   reset() {
     for (const el of [...this.bars.keys()]) this.removeBar(el);
     this.last = { gold: -1, wave: -1, waveP: -1, keep: -1, hint: '' };
+    this.goldShown = this.goldTarget = 0;
+    this.goldEl.textContent = '0';
+    this.setXp(1, 0);
+    this.setCombo(0);
+    this.perksEl.classList.add('hidden');
     this.bannerEl.className = '';
     this.hint('');
   }

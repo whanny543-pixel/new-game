@@ -3,9 +3,9 @@
 export const COLORS = {
   sky: 0xf2c38b,
   fog: 0xe9b57a,
-  sand: 0xdcaa6a,
-  sandDark: 0xc48f52,
-  sandLight: 0xe8bf86,
+  sand: 0xebc07f,
+  sandDark: 0xd9a865,
+  sandLight: 0xf5d49c,
   road: 0x8f5532,
   roadEdge: 0xa86c40,
   cliff: 0xd58a56,
@@ -21,7 +21,7 @@ export const COLORS = {
   wood: 0x9b6638,
   woodDark: 0x6a4122,
   woodLight: 0xc08850,
-  roof: 0x7d4d2b,
+  roof: 0xa33a2a,
   stone: 0xb9b2a6,
   stoneDark: 0x8d867b,
   skin: 0xf2c9a0,
@@ -50,7 +50,11 @@ export const PLAYER = {
   respawnTime: 3,
   maxVisibleStack: 50,
   maxWeapons: 10,
+  startGold: 14,
 };
+
+/** Each coin is worth more as waves climb, so late builds still come quickly. */
+export const coinValue = (wave: number) => 1 + Math.floor(Math.max(0, wave - 1) / 2);
 
 export const HALL = { maxHp: 1200, regen: 3, radius: 3.4 };
 
@@ -82,7 +86,7 @@ export const POST_LEVELS = [{ slots: 2 }, { slots: 4 }];
 export const BARRICADE_HP = [220, 380];
 
 /** Forge / bowyer: seconds per weapon at each level, and rack capacity. */
-export const WORKSHOP = { interval: [6, 4.2, 3], rackMax: 8 };
+export const WORKSHOP = { interval: [3.2, 2.2, 1.5], rackMax: 10 };
 
 export type EnemyKind = 'goblin' | 'runner' | 'troll';
 
@@ -102,9 +106,9 @@ export const ENEMIES: Record<EnemyKind, EnemyType> = {
 };
 
 export const WAVES = {
-  firstDelay: 3,
-  duration: 26,
-  breakTime: 4,
+  firstDelay: 2,
+  duration: 22,
+  breakTime: 3,
   baseCount: 14,
   countPerWave: 7,
   hpGrowth: 0.1,
@@ -163,20 +167,20 @@ export interface PlotDef {
 const recruitCosts = (start: number, step: number) => Array.from({ length: 60 }, (_, i) => start + i * step);
 
 export const PLOTS: PlotDef[] = [
-  { id: 'tw1', kind: 'tower', place: { road: 0, t: 0.86, side: 1, dist: 3.8 }, costs: [5, 35, 110], requires: [] },
-  { id: 'tw2', kind: 'tower', place: { road: 0, t: 0.66, side: -1, dist: 3.8 }, costs: [10, 40, 110], requires: ['tw1'] },
-  { id: 'range', kind: 'range', place: { x: -8, z: 3 }, costs: [18], requires: ['tw2'] },
-  { id: 'recA', kind: 'recruitArcher', place: { x: -8, z: 8.6 }, costs: recruitCosts(6, 2), requires: ['range'] },
-  { id: 'bar1', kind: 'barricade', place: { road: 0, t: 0.79, side: 0, dist: 0 }, costs: [10], requires: ['range'] },
-  { id: 'gp1', kind: 'post', place: { road: 0, t: 0.74, side: 0, dist: 0 }, costs: [15, 55], requires: ['range'] },
-  { id: 'barracks', kind: 'barracks', place: { x: 7.5, z: 7.5 }, costs: [25], requires: ['gp1'] },
-  { id: 'recK', kind: 'recruitKnight', place: { x: 11.6, z: 9.8 }, costs: recruitCosts(8, 3), requires: ['barracks'] },
-  { id: 'forge', kind: 'forge', place: { x: -9, z: -5 }, costs: [30, 100, 240], requires: ['barracks'] },
-  { id: 'tw3', kind: 'tower', place: { road: 0, t: 0.46, side: 1, dist: 3.8 }, costs: [25, 70, 160], requires: ['barracks'] },
-  { id: 'bowyer', kind: 'bowyer', place: { x: -2.5, z: 12 }, costs: [30, 100, 240], requires: ['forge'] },
-  { id: 'tw4', kind: 'tower', place: { road: 0, t: 0.32, side: -1, dist: 3.8 }, costs: [35, 85, 190], requires: ['bowyer'] },
-  { id: 'gp2', kind: 'post', place: { road: 0, t: 0.53, side: 0, dist: 0 }, costs: [30, 80], requires: ['tw3'] },
-  { id: 'bar2', kind: 'barricade', place: { road: 0, t: 0.58, side: 0, dist: 0 }, costs: [20], requires: ['gp2'] },
+  { id: 'tw1', kind: 'tower', place: { road: 0, t: 0.86, side: 1, dist: 3.8 }, costs: [5, 25, 70], requires: [] },
+  { id: 'tw2', kind: 'tower', place: { road: 0, t: 0.66, side: -1, dist: 3.8 }, costs: [8, 30, 80], requires: ['tw1'] },
+  { id: 'range', kind: 'range', place: { x: -8, z: 3 }, costs: [12], requires: ['tw1'] },
+  { id: 'recA', kind: 'recruitArcher', place: { x: -8, z: 8.6 }, costs: recruitCosts(4, 1), requires: ['range'] },
+  { id: 'bar1', kind: 'barricade', place: { road: 0, t: 0.79, side: 0, dist: 0 }, costs: [8], requires: ['tw2'] },
+  { id: 'gp1', kind: 'post', place: { road: 0, t: 0.74, side: 0, dist: 0 }, costs: [12, 45], requires: ['range'] },
+  { id: 'barracks', kind: 'barracks', place: { x: 7.5, z: 7.5 }, costs: [18], requires: ['gp1'] },
+  { id: 'recK', kind: 'recruitKnight', place: { x: 11.6, z: 9.8 }, costs: recruitCosts(5, 2), requires: ['barracks'] },
+  { id: 'forge', kind: 'forge', place: { x: -9, z: -5 }, costs: [22, 70, 160], requires: ['barracks'] },
+  { id: 'tw3', kind: 'tower', place: { road: 0, t: 0.46, side: 1, dist: 3.8 }, costs: [18, 50, 120], requires: ['tw2'] },
+  { id: 'bowyer', kind: 'bowyer', place: { x: -2.5, z: 12 }, costs: [22, 70, 160], requires: ['forge'] },
+  { id: 'tw4', kind: 'tower', place: { road: 0, t: 0.32, side: -1, dist: 3.8 }, costs: [28, 65, 140], requires: ['tw3'] },
+  { id: 'gp2', kind: 'post', place: { road: 0, t: 0.53, side: 0, dist: 0 }, costs: [24, 60], requires: ['tw3'] },
+  { id: 'bar2', kind: 'barricade', place: { road: 0, t: 0.58, side: 0, dist: 0 }, costs: [15], requires: ['gp2'] },
   // The east road opens later in the run.
   { id: 'tw5', kind: 'tower', place: { road: 1, t: 0.8, side: 1, dist: 3.8 }, costs: [30, 80, 180], requires: ['wave:7'] },
   { id: 'tw6', kind: 'tower', place: { road: 1, t: 0.55, side: -1, dist: 3.8 }, costs: [40, 95, 200], requires: ['wave:7'] },

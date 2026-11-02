@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { COLORS, ROAD_HALF_WIDTH } from './config';
+import { detailize } from './materials';
 
 /** A smooth road sampled into an arc-length table so enemies can walk it by distance. */
 export class Road {
@@ -110,7 +111,7 @@ export class Road {
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const m = new THREE.Mesh(g, detailize(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 }), 0.5, 1.1));
     m.receiveShadow = true;
     return m;
   }

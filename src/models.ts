@@ -1,31 +1,45 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { COLORS } from './config';
+import { detailize, standard } from './materials';
 
 // Procedural low-poly models in a warm frontier style. Static buildings are merged into one
 // vertex-coloured mesh each, and the enemy horde is drawn with instancing, so a screen full of
 // goblins stays cheap on phones.
 
-const lambert = (color: number, extra: THREE.MeshLambertMaterialParameters = {}) =>
-  new THREE.MeshLambertMaterial({ color, ...extra });
+const lambert = (color: number, extra: THREE.MeshStandardMaterialParameters = {}) => standard(color, extra);
 
 export const MAT = {
-  vc: new THREE.MeshLambertMaterial({ vertexColors: true }),
-  vcFlat: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
-  steel: lambert(COLORS.steel),
-  steelDark: lambert(COLORS.steelDark),
-  team: lambert(COLORS.team),
+  vc: detailize(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }), 0.34),
+  vcFlat: detailize(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0, flatShading: true }), 0.4),
+  /** The horde: slightly glossy skin so rim light catches on hundreds of goblins. */
+  crowd: detailize(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0 }), 0.22),
+  steel: lambert(COLORS.steel, { metalness: 0.75, roughness: 0.35 }),
+  steelDark: lambert(COLORS.steelDark, { metalness: 0.6, roughness: 0.45 }),
+  team: lambert(COLORS.team, { roughness: 0.7 }),
   plume: lambert(COLORS.plume),
-  skin: lambert(COLORS.skin),
-  coin: lambert(COLORS.coin, { emissive: COLORS.coinDeep, emissiveIntensity: 0.35 }),
+  skin: lambert(COLORS.skin, { roughness: 0.7 }),
+  coin: new THREE.MeshStandardMaterial({
+    color: COLORS.coin,
+    metalness: 1,
+    roughness: 0.28,
+    emissive: 0xffa800,
+    emissiveIntensity: 0.9,
+  }),
   wood: lambert(COLORS.wood),
   woodDark: lambert(COLORS.woodDark),
-  arrow: new THREE.MeshBasicMaterial({ color: COLORS.arrow }),
+  arrow: new THREE.MeshBasicMaterial({ color: 0xfff6d8 }),
   bolt: new THREE.MeshBasicMaterial({ color: 0xfff0b0 }),
-  fire: lambert(COLORS.fire, { emissive: COLORS.fire, emissiveIntensity: 1 }),
-  white: lambert(0xffffff),
-  shadow: new THREE.MeshBasicMaterial({ color: 0x3a1d05, transparent: true, opacity: 0.22, depthWrite: false }),
-  ring: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false }),
+  fire: new THREE.MeshStandardMaterial({ color: COLORS.fire, emissive: COLORS.fire, emissiveIntensity: 5 }),
+  white: new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.55, roughness: 0.35 }),
+  shadow: new THREE.MeshBasicMaterial({ color: 0x3a1d05, transparent: true, opacity: 0.26, depthWrite: false }),
+  glowRing: new THREE.MeshBasicMaterial({
+    color: 0xffd86b,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }),
 };
 
 function swordGeometry() {
@@ -151,6 +165,7 @@ export interface HeroRig {
   muzzle: THREE.Object3D;
   backAnchor: THREE.Group;
   frontAnchor: THREE.Group;
+  ring: THREE.Mesh;
 }
 
 export function makeHero(): HeroRig {
@@ -169,8 +184,17 @@ export function makeHero(): HeroRig {
   k.add(new THREE.CapsuleGeometry(0.24, 0.5, 2, 8), COLORS.plume, 0, 1.0, -0.33, 0.25, 0, 0, 1.2, 1, 0.35); // cape
   k.add(new THREE.CylinderGeometry(0.3, 0.3, 0.06, 10), COLORS.team, -0.44, 0.86, 0.05, 0, 0, Math.PI / 2);
   k.add(new THREE.CylinderGeometry(0.12, 0.12, 0.07, 8), COLORS.coin, -0.48, 0.86, 0.05, 0, 0, Math.PI / 2);
+  // Pauldrons, gauntlets, belt buckle, boots
+  for (const side of [-1, 1]) {
+    k.add(new THREE.SphereGeometry(0.2, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), COLORS.steel, side * 0.38, 1.2, 0, 0, 0, side * 0.5, 1, 0.8, 1);
+    k.add(new THREE.TorusGeometry(0.17, 0.035, 5, 12), COLORS.coin, side * 0.38, 1.21, 0, Math.PI / 2, 0, side * 0.5);
+  }
+  k.box(0.16, 0.14, 0.05, COLORS.coin, 0, 1.02, 0.42);
+  k.add(new THREE.CylinderGeometry(0.33, 0.37, 0.06, 12), COLORS.coin, 0, 1.3, 0);
+  k.add(new THREE.ConeGeometry(0.06, 0.18, 6), COLORS.coin, 0, 1.86, 0.26, 0.6);
   // Crossbow
   k.box(0.1, 0.1, 0.62, COLORS.wood, 0.42, 0.95, 0.25);
+  k.box(0.04, 0.04, 0.5, COLORS.steel, 0.42, 1.01, 0.3);
   k.add(new THREE.TorusGeometry(0.3, 0.03, 4, 12, Math.PI), COLORS.woodDark, 0.42, 0.95, 0.43, -Math.PI / 2, 0, 0);
   body.add(k.mesh());
 
@@ -192,8 +216,15 @@ export function makeHero(): HeroRig {
   frontAnchor.position.set(0, 1.25, 0.55);
   body.add(frontAnchor);
 
-  root.add(blobShadow(0.6));
-  return { root, body, legL, legR, muzzle, backAnchor, frontAnchor };
+  root.add(blobShadow(0.65));
+  const ring = new THREE.Mesh(GEO.ring, MAT.glowRing);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.04;
+  ring.scale.setScalar(0.95);
+  ring.renderOrder = 2;
+  root.add(ring);
+  root.scale.setScalar(1.15);
+  return { root, body, legL, legR, muzzle, backAnchor, frontAnchor, ring };
 }
 
 // ---------------------------------------------------------------- Defenders
@@ -202,7 +233,7 @@ export interface UnitRig {
   root: THREE.Group;
   body: THREE.Group;
   weapon: THREE.Mesh;
-  weaponMat: THREE.MeshLambertMaterial;
+  weaponMat: THREE.MeshStandardMaterial;
   muzzle: THREE.Object3D;
 }
 
@@ -217,7 +248,7 @@ export function makeArcher(): UnitRig {
   k.add(new THREE.ConeGeometry(0.25, 0.42, 8), 0x5e8f3a, 0, 1.2, -0.03, -0.2);
   k.box(0.14, 0.4, 0.14, COLORS.woodDark, 0.12, 0.75, -0.25, 0, 0.3); // quiver
   body.add(k.mesh());
-  const weaponMat = lambert(0xffffff);
+  const weaponMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
   const weapon = mesh(GEO.bow, weaponMat, false);
   weapon.position.set(0.28, 0.66, 0.22);
   weapon.rotation.y = Math.PI / 2;
@@ -242,7 +273,7 @@ export function makeKnight(): UnitRig {
   k.add(new THREE.CylinderGeometry(0.27, 0.27, 0.06, 10), COLORS.team, -0.36, 0.6, 0.12, 0, 0.3, Math.PI / 2);
   k.add(new THREE.CylinderGeometry(0.1, 0.1, 0.07, 8), COLORS.coin, -0.39, 0.6, 0.13, 0, 0.3, Math.PI / 2);
   body.add(k.mesh());
-  const weaponMat = lambert(0xffffff);
+  const weaponMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.7, roughness: 0.3 });
   const weapon = mesh(GEO.sword, weaponMat, false);
   weapon.position.set(0.34, 0.55, 0.15);
   weapon.rotation.x = 0.9;
@@ -276,19 +307,24 @@ export function enemyGeometry(kind: 'goblin' | 'runner' | 'troll') {
   const sc = small ? 0.82 : 1;
   const skin = COLORS.goblin;
   k.add(new THREE.CapsuleGeometry(0.26 * sc, 0.26 * sc, 3, 8), small ? COLORS.runner : COLORS.rag, 0, 0.5 * sc, 0);
-  k.add(new THREE.SphereGeometry(0.31 * sc, 10, 8), skin, 0, 1.0 * sc, 0.02);
+  k.add(new THREE.SphereGeometry(0.36 * sc, 12, 10), skin, 0, 1.02 * sc, 0.03, 0, 0, 0, 1.08, 0.95, 1);
   for (const side of [-1, 1]) {
-    k.add(new THREE.ConeGeometry(0.08 * sc, 0.38 * sc, 4), skin, side * 0.4 * sc, 1.05 * sc, 0, 0, 0, side * -1.3);
-    k.add(new THREE.SphereGeometry(0.05 * sc, 6, 5), 0xffe14a, side * 0.11 * sc, 1.05 * sc, 0.27 * sc);
-    k.add(new THREE.CapsuleGeometry(0.07 * sc, 0.25 * sc, 2, 5), skin, side * 0.3 * sc, 0.55 * sc, 0.05);
+    k.add(new THREE.ConeGeometry(0.1 * sc, 0.5 * sc, 5), skin, side * 0.48 * sc, 1.1 * sc, -0.02, 0.2, 0, side * -1.25);
+    k.add(new THREE.SphereGeometry(0.085 * sc, 8, 6), 0xfff3a0, side * 0.13 * sc, 1.09 * sc, 0.29 * sc);
+    k.add(new THREE.SphereGeometry(0.045 * sc, 6, 5), 0x1a0d05, side * 0.13 * sc, 1.09 * sc, 0.36 * sc);
+    k.add(new THREE.CapsuleGeometry(0.075 * sc, 0.26 * sc, 2, 6), skin, side * 0.32 * sc, 0.55 * sc, 0.05, 0, 0, side * 0.3);
+    k.add(new THREE.CapsuleGeometry(0.08 * sc, 0.12 * sc, 2, 6), COLORS.goblinDark, side * 0.13 * sc, 0.12 * sc, 0);
+    k.add(new THREE.ConeGeometry(0.03, 0.08, 4), 0xfff6dc, side * 0.07 * sc, 0.86 * sc, 0.33 * sc, Math.PI);
   }
-  k.add(new THREE.ConeGeometry(0.05, 0.12, 4), skin, 0, 0.98 * sc, 0.33 * sc, Math.PI / 2);
+  k.add(new THREE.ConeGeometry(0.065, 0.2, 5), COLORS.goblinDark, 0, 0.98 * sc, 0.4 * sc, Math.PI / 2);
+  k.box(0.5 * sc, 0.07, 0.42 * sc, COLORS.woodDark, 0, 0.42 * sc, 0);
   if (small) {
     k.add(new THREE.ConeGeometry(0.31, 0.5, 8), COLORS.runner, 0, 1.25, -0.03, -0.25);
   } else {
     k.add(new THREE.CylinderGeometry(0.09, 0.05, 0.62, 5), COLORS.woodDark, 0.34, 0.65, 0.22, 0.8);
-    k.add(new THREE.SphereGeometry(0.34, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2.2), 0xc8402a, 0, 1.12, 0.0);
-    k.add(new THREE.ConeGeometry(0.06, 0.3, 5), 0xf0e2c4, 0, 1.5, 0.0);
+    k.add(new THREE.SphereGeometry(0.39, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2.2), 0xc8402a, 0, 1.14, 0.0);
+    k.add(new THREE.ConeGeometry(0.07, 0.34, 5), 0xf0e2c4, 0, 1.55, 0.0);
+    k.add(new THREE.CylinderGeometry(0.2, 0.2, 0.05, 10), 0x8a5a33, -0.36, 0.62, 0.12, 0, 0, Math.PI / 2);
   }
   return k.geometry();
 }

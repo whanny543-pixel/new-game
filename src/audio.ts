@@ -103,6 +103,17 @@ export class Sfx {
     if (!this.gate('wave', 0.5)) return;
     [392, 523].forEach((f, i) => this.tone(f, 0.25, 'square', 0.06, undefined, i * 0.12));
   }
+  levelUp() {
+    if (!this.gate('levelup', 0.3)) return;
+    [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 0.25, 'triangle', 0.13, undefined, i * 0.06));
+    this.tone(2093, 0.5, 'sine', 0.05, undefined, 0.3);
+  }
+  /** A shower of coin "tinks" (treasure chests, combo milestones). */
+  treasure() {
+    if (!this.gate('treasure', 0.3)) return;
+    for (let i = 0; i < 14; i++) this.tone(1200 + Math.random() * 900, 0.08, 'sine', 0.07, undefined, i * 0.045);
+    this.tone(392, 0.4, 'triangle', 0.1);
+  }
   boom() {
     if (this.gate('boom', 0.2)) this.noise(0.9, 0.6, 700);
   }

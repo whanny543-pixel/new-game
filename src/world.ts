@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { COLORS, ROAD_HALF_WIDTH, ROADS } from './config';
 import { Road } from './road';
-import { makeBush, makeCactus, makeDeadTree, makeLantern, makeMesa, makeProps, makeRock } from './models';
+import { detailize } from './materials';
+import { MAT, makeBush, makeCactus, makeDeadTree, makeLantern, makeMesa, makeProps, makeRock } from './models';
 
 /** Small deterministic RNG so the map looks the same every run. */
 export function mulberry32(seed: number) {
@@ -64,8 +66,8 @@ export class World {
     scene.background = new THREE.Color(COLORS.sky);
     scene.fog = new THREE.Fog(COLORS.fog, 55, 105);
 
-    scene.add(new THREE.HemisphereLight(0xfff0dc, 0xb87a48, 1.1));
-    const sun = new THREE.DirectionalLight(0xffdcae, 2.6);
+    scene.add(new THREE.HemisphereLight(0xc9dcff, 0x8a6a6a, 0.8));
+    const sun = new THREE.DirectionalLight(0xffd29a, 2.5);
     sun.castShadow = true;
     sun.shadow.mapSize.set(shadowSize, shadowSize);
     const s = sun.shadow.camera;
@@ -80,7 +82,10 @@ export class World {
 
     const tex = sandTexture();
     tex.repeat.set(14, 14);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshLambertMaterial({ map: tex }));
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(220, 220),
+      detailize(new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95, metalness: 0 }), 0.45, 0.9),
+    );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
@@ -131,6 +136,7 @@ export class World {
     place(() => makeRock(rng), 60, 6, 60, 0.8);
     place(() => makeDeadTree(rng), 18, 10, 55, 1);
     place(() => makeProps(rng), 10, 9, 22, 1.2);
+    this.scatterGround(scene, rng, clear);
 
     // Lanterns along the last stretch of each road.
     for (const road of this.roads) {
@@ -141,6 +147,61 @@ export class World {
         scene.add(l);
       }
     }
+  }
+
+  /** Thousands of pebbles and dry tufts as two instanced meshes: texture for almost free. */
+  private scatterGround(scene: THREE.Scene, rng: () => number, clear: (x: number, z: number, pad: number) => boolean) {
+    const pebbleGeo = new THREE.DodecahedronGeometry(0.12, 0);
+    const pebbles = new THREE.InstancedMesh(pebbleGeo, MAT.vcFlat, 1800);
+    const tuftParts: THREE.BufferGeometry[] = [];
+    for (let i = 0; i < 5; i++) {
+      const blade = new THREE.ConeGeometry(0.045, 0.5, 3);
+      blade.translate(0, 0.25, 0);
+      blade.rotateZ((i - 2) * 0.28);
+      blade.rotateY(i * 1.3);
+      tuftParts.push(blade.toNonIndexed());
+      blade.dispose();
+    }
+    const tuftGeo = mergeGeometries(tuftParts)!;
+    const tufts = new THREE.InstancedMesh(tuftGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), 900);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const e = new THREE.Euler();
+    const c = new THREE.Color();
+    const pebbleCols = [COLORS.cliffDark, COLORS.cliff, COLORS.sandDark, 0x9c8a78, 0xb98a60];
+    const tuftCols = [0xb8a35a, 0x9e9a4e, 0xc9b26a, 0x8f8a3e];
+    // Pebbles need a colour attribute for the vertex-colour material: give them white and tint per instance.
+    const n = pebbleGeo.attributes.position.count;
+    pebbleGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+    let pi = 0;
+    let ti = 0;
+    for (let k = 0; k < 6000 && (pi < 1800 || ti < 900); k++) {
+      const x = (rng() - 0.5) * 120;
+      const z = (rng() - 0.5) * 110 - 12;
+      const onRoadOk = rng() < 0.25; // some pebbles sit on the road edges
+      if (!clear(x, z, -1.2) && !onRoadOk) continue;
+      if (Math.hypot(x, z) < 6) continue;
+      if (pi < 1800 && rng() < 0.7) {
+        const s = 0.5 + rng() * 1.6;
+        q.setFromEuler(e.set(rng() * 3, rng() * 3, rng() * 3));
+        m.compose(new THREE.Vector3(x, 0.03, z), q, new THREE.Vector3(s, s * (0.5 + rng() * 0.4), s));
+        pebbles.setMatrixAt(pi, m);
+        pebbles.setColorAt(pi, c.set(pebbleCols[Math.floor(rng() * pebbleCols.length)]));
+        pi++;
+      } else if (ti < 900 && clear(x, z, 0)) {
+        const s = 0.6 + rng() * 0.9;
+        q.setFromEuler(e.set(0, rng() * 6, 0));
+        m.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(s, s, s));
+        tufts.setMatrixAt(ti, m);
+        tufts.setColorAt(ti, c.set(tuftCols[Math.floor(rng() * tuftCols.length)]));
+        ti++;
+      }
+    }
+    pebbles.count = pi;
+    tufts.count = ti;
+    pebbles.receiveShadow = true;
+    tufts.castShadow = false;
+    scene.add(pebbles, tufts);
   }
 
   update(focus: THREE.Vector3) {
