@@ -8,23 +8,23 @@ import { detailize } from './materials';
 import heroUrl from './assets/models/king.glb?url';
 import archerUrl from './assets/models/archer.glb?url';
 import knightUrl from './assets/models/knight.glb?url';
-import minionUrl from './assets/models/goblin.glb?url';
-import rogueUrl from './assets/models/goblin_runner.glb?url';
+import raiderUrl from './assets/models/raider.glb?url';
+import bruteUrl from './assets/models/brute.glb?url';
 import propsUrl from './assets/models/props.glb?url';
-import workerUrl from './assets/models/worker.glb?url';
+import natureUrl from './assets/models/nature.glb?url';
 import villagerUrl from './assets/models/villager.glb?url';
 
-// 3D models (all CC0): KayKit by Kay Lousberg, Kenney (kenney.nl), Quaternius (quaternius.com).
+// 3D models (all CC0): KayKit by Kay Lousberg (Adventurers 2.0, Medieval Hexagon, Forest Nature), Kenney (kenney.nl),
+// Quaternius (Stylized Nature MegaKit).
 
-export type CharName = 'hero' | 'archer' | 'knight' | 'minion' | 'rogue' | 'worker' | 'villager';
+export type CharName = 'hero' | 'archer' | 'knight' | 'raider' | 'brute' | 'villager';
 
 const CHAR_URLS: Record<CharName, string> = {
   hero: heroUrl,
   archer: archerUrl,
   knight: knightUrl,
-  minion: minionUrl,
-  rogue: rogueUrl,
-  worker: workerUrl,
+  raider: raiderUrl,
+  brute: bruteUrl,
   villager: villagerUrl,
 };
 
@@ -171,7 +171,7 @@ export class Assets {
     loader.setMeshoptDecoder(MeshoptDecoder);
     const names = Object.keys(CHAR_URLS) as CharName[];
     let done = 0;
-    const total = names.length + 1;
+    const total = names.length + 2;
     const tick = () => onProgress(++done / total);
     // Inlined builds embed models as data: URLs. Decode those directly rather than fetching them,
     // since some hosts (sandboxed pages) block fetch() of data: URLs.
@@ -187,13 +187,14 @@ export class Assets {
       return g;
     };
 
-    const [props, ...chars] = await Promise.all([load(propsUrl), ...names.map((n) => load(CHAR_URLS[n]))]);
+    const [props, nature, ...chars] = await Promise.all([load(propsUrl), load(natureUrl), ...names.map((n) => load(CHAR_URLS[n]))]);
     a.prepareProps(props);
+    a.prepareProps(nature, true);
     names.forEach((n, i) => a.prepareChar(n, chars[i]));
     return a;
   }
 
-  private prepareProps(g: GLTF) {
+  private prepareProps(g: GLTF, painted = false) {
     const tuned = new Set<THREE.Material>();
     for (const child of [...g.scene.children]) {
       child.traverse((o) => {
@@ -204,9 +205,16 @@ export class Assets {
         const mat = m.material as THREE.MeshStandardMaterial;
         if (!tuned.has(mat)) {
           tuned.add(mat);
-          mat.roughness = 0.78;
+          mat.roughness = painted ? 0.9 : 0.78;
           mat.metalness = 0;
-          detailize(mat, 0.16, 0.9);
+          // Painted textures carry their own detail; leaves are alpha cut-outs seen from both sides.
+          if (painted) {
+            if (mat.alphaTest > 0 || mat.transparent) {
+              mat.transparent = false;
+              mat.alphaTest = 0.5;
+              mat.side = THREE.DoubleSide;
+            }
+          } else detailize(mat, 0.16, 0.9);
         }
       });
       this.props.set(child.name, child);

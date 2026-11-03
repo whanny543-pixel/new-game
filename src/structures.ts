@@ -116,6 +116,24 @@ export function barMaterial() {
 
 // ---------------------------------------------------------------- characters
 
+/** Puts a weapon model into a character's hand slot; returns its first mesh. */
+function arm(char: CharRig, name: string, slot: 'handslotr' | 'handslotl') {
+  const src = A.props.get(name);
+  const bone = char.find(slot);
+  if (!src || !bone) return null;
+  const w = src.clone(true);
+  w.position.set(0, 0, 0);
+  bone.add(w);
+  let mesh: THREE.Mesh | null = null;
+  w.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.castShadow = true;
+    if (!mesh) mesh = m;
+  });
+  return mesh as THREE.Mesh | null;
+}
+
 export interface HeroRig {
   root: THREE.Group;
   char: CharRig;
@@ -128,13 +146,14 @@ export interface HeroRig {
 export function makeHero(): HeroRig {
   const char = A.character('hero', 2.35);
   const root = char.root;
+  const sword = arm(char, 'sword_1handed', 'handslotr');
+  arm(char, 'shield_badge_color', 'handslotl');
   dressAsKing(char);
   // Golden bolts leave from the tip of the royal sword.
   const muzzle = new THREE.Object3D();
-  const sword = char.find('1H_Sword');
   if (sword) {
     sword.add(muzzle);
-    muzzle.position.set(0, 0.9, 0);
+    muzzle.position.set(0, 0.7, 0);
   } else {
     muzzle.position.set(0.4, 1.4, 0.4);
     root.add(muzzle);
@@ -155,6 +174,9 @@ export function makeHero(): HeroRig {
   char.loop('Idle');
   return { root, char, muzzle, backAnchor, frontAnchor, ring };
 }
+
+/** Where the crown sits on the head bone (model units). */
+const CROWN = { y: 1.02, s: 1.15 };
 
 /** Crown, red royal cape and gilded armour turn the knight model into the king. */
 function dressAsKing(char: CharRig) {
@@ -178,8 +200,8 @@ function dressAsKing(char: CharRig) {
   const head = char.find('head');
   if (head) {
     head.add(crown);
-    crown.position.set(0, 1.12, 0);
-    crown.scale.setScalar(1.25);
+    crown.position.set(0, CROWN.y, 0);
+    crown.scale.setScalar(CROWN.s);
   }
   char.model.traverse((o) => {
     const m = o as THREE.Mesh;
@@ -188,7 +210,7 @@ function dressAsKing(char: CharRig) {
       m.material = new THREE.MeshStandardMaterial({ color: 0xb3122a, roughness: 0.75 });
       return;
     }
-    if (o.name === 'Badge_Shield' || o.name === '1H_Sword') return;
+    if (o.name === 'Badge_Shield' || o.name === '1H_Sword' || o.parent?.name?.startsWith('handslot')) return;
     // Gild the armour: warm tint on a private copy of the material.
     const mat = (m.material as THREE.MeshStandardMaterial).clone();
     mat.color.setRGB(1.12, 0.98, 0.72);
@@ -206,8 +228,9 @@ export interface UnitRig {
 }
 
 export function makeUnit(type: 'archer' | 'knight'): UnitRig {
-  const char = A.character(type, type === 'archer' ? 1.65 : 1.75);
-  const weapon = char.find(type === 'archer' ? '1H_Crossbow' : '1H_Sword') as THREE.Mesh | undefined;
+  const char = A.character(type, type === 'archer' ? 1.7 : 1.8);
+  const weapon = type === 'archer' ? arm(char, 'bow_withString', 'handslotl') : arm(char, 'sword_1handed', 'handslotr');
+  if (type === 'knight') arm(char, 'shield_badge_color', 'handslotl');
   let weaponMat = new THREE.MeshStandardMaterial();
   if (weapon) {
     // Each unit gets its own weapon material so it can show the weapon tier colour.
@@ -435,9 +458,9 @@ export function makeChest() {
   return { root, lid };
 }
 
-/** Kingdom folk: woodcutters/builders ('worker') and townsfolk/miners ('villager'). */
-export function makeNpc(kind: 'worker' | 'villager') {
-  const char = A.character(kind, kind === 'worker' ? 1.6 : 1.5);
+/** Townsfolk who move into claimed land. */
+export function makeNpc(kind: 'villager') {
+  const char = A.character(kind, 1.5);
   char.root.add(blobShadow(0.38));
   char.loop('Idle');
   return char;

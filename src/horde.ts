@@ -25,10 +25,10 @@ interface KindSetup {
 }
 
 const SETUP: Record<EnemyKind, KindSetup> = {
-  goblin: { char: 'minion', height: 1.35, move: 'Walk', weapons: [] },
-  runner: { char: 'rogue', height: 1.25, move: 'Run', weapons: [] },
-  // The warlord is a giant skull-masked orc.
-  troll: { char: 'rogue', height: 3.6, move: 'Walk', weapons: [] },
+  // Red-hooded raiders with axes, a quicker pack with daggers, and the big brute warlord.
+  goblin: { char: 'raider', height: 1.5, move: 'Walk', weapons: [['axe_1handed', 'handslotr']] },
+  runner: { char: 'raider', height: 1.4, move: 'Run', weapons: [['dagger', 'handslotr']] },
+  troll: { char: 'brute', height: 3.4, move: 'Walk', weapons: [['axe_2handed', 'handslotr']] },
 };
 
 const FRAMES: Record<HordeAnim, number> = { move: 14, attack: 10, death: 12, spawn: 6 };
@@ -85,6 +85,42 @@ function bakeClip(scene: THREE.Object3D, clip: THREE.AnimationClip, frames: numb
   return out;
 }
 
+/**
+ * Repaints a character texture as a red uniform: cloth and leather become shades of red (by
+ * brightness), skin tones are kept, so the horde reads as one bold red army.
+ */
+function redRamp(src: THREE.Texture, base: [number, number, number]) {
+  const img = src.image as CanvasImageSource & { width: number; height: number };
+  const c = document.createElement('canvas');
+  c.width = img.width;
+  c.height = img.height;
+  const g = c.getContext('2d')!;
+  g.drawImage(img, 0, 0);
+  const data = g.getImageData(0, 0, c.width, c.height);
+  const d = data.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i] / 255;
+    const gr = d[i + 1] / 255;
+    const b = d[i + 2] / 255;
+    const skin = r > 0.55 && r > gr * 1.08 && gr > b * 1.05 && r - b > 0.15 && r - b < 0.55;
+    if (skin) continue;
+    const l = 0.3 * r + 0.55 * gr + 0.15 * b;
+    const k = 0.45 + l * 1.25;
+    d[i] = Math.min(255, base[0] * k * 255 + l * 40);
+    d[i + 1] = Math.min(255, base[1] * k * 255 + l * 30);
+    d[i + 2] = Math.min(255, base[2] * k * 255 + l * 30);
+  }
+  g.putImageData(data, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = src.colorSpace;
+  t.flipY = src.flipY;
+  t.wrapS = src.wrapS;
+  t.wrapT = src.wrapT;
+  t.magFilter = src.magFilter;
+  t.minFilter = src.minFilter;
+  return t;
+}
+
 const tmpM = new THREE.Matrix4();
 const tmpQ = new THREE.Quaternion();
 const tmpS = new THREE.Vector3();
@@ -110,17 +146,12 @@ export class Horde {
         if (!material && (o as THREE.Mesh).isMesh) material = ((o as THREE.Mesh).material as THREE.Material).clone();
       });
       const mat = material as unknown as THREE.MeshStandardMaterial;
-      mat.roughness = 0.55;
-      // A bold red horde that reads instantly against green grass; the ogre warlord is a big
-      // pinkish brute (his texture kept, warmed up).
-      if (kind === 'troll') {
-        mat.color.setRGB(1.35, 0.78, 0.78);
-      } else {
-        mat.map = null;
-        mat.color.set(kind === 'runner' ? 0xb0242c : 0xe0352f);
-        mat.emissive.set(0x3a0606);
-        mat.flatShading = false;
-      }
+      mat.roughness = 0.6;
+      mat.metalness = 0;
+      // A bold red horde that reads at a glance against green grass; the brute keeps his
+      // own colours, warmed up a touch so he stands out as the boss.
+      if (kind === 'troll') mat.color.setRGB(1.12, 0.92, 0.88);
+      else if (mat.map) mat.map = redRamp(mat.map, kind === 'runner' ? [0.55, 0.08, 0.1] : [0.85, 0.14, 0.12]);
       const anims = {} as Record<HordeAnim, Baked>;
       for (const anim of Object.keys(FRAMES) as HordeAnim[]) {
         const clipName = anim === 'move' ? s.move : CLIPS[anim];

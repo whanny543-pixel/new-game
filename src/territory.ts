@@ -1,27 +1,27 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Assets } from './assets';
 import type { MapPalette } from './config';
 import { detailize } from './materials';
 import { BOUNDS, LANDS, SPOTS, type Land } from './realm';
-import { groundTexture, mulberry32 } from './world';
-import { makeCliffRing, makePines } from './scenery';
+import { bakeStatic, groundTexture, mulberry32 } from './world';
 
-// Claimed land turns into a bright meadow: a grass layer masked by a small canvas that grows outward
-// from where the last fence went up, with tufts and flowers sprouting as it passes and the wild
-// forest clearing away. Unclaimed land is dark, overgrown forest, ringed by deep woods and mist.
+// The realm's look. Unclaimed land is wild forest (painted trees, tall grass, ferns, mossy rocks);
+// claimed land becomes a bright meadow: a grass layer masked by a small canvas grows outward from
+// where the last fence went up, the wild growth withers as it passes, and grass, clover and flowers
+// sprout in its place. Deep woods and big mossy boulders ring the valley, with mist beyond.
+// Models: Quaternius Stylized Nature MegaKit (CC0).
 
 const EXTENT = 136; // world units covered by the mask
 const MASK = 272; // mask pixels (2 per unit: soft edges after linear filtering)
 const GROW = 1.6; // seconds for green to cover a land
 
-/** Trees of the wild forest (KayKit Forest Nature and Medieval Hexagon). */
-const WILD_TREES = ['Tree_4_A_Color1', 'Tree_5_A_Color1', 'Tree_4_A_Color1', 'Tree_5_A_Color1', 'Tree_1_A_Color1', 'tree_single_A'];
+const WILD_TREES = ['Pine_1', 'Pine_2', 'Pine_4', 'Pine_5', 'CommonTree_3', 'CommonTree_5', 'CommonTree_4'];
+const MEADOW_TREES = ['CommonTree_1', 'CommonTree_2', 'CommonTree_3'];
 
 const GRASS: MapPalette = {
-  ground: 0x229a48,
-  groundDark: 0x1c8c40,
-  groundLight: 0x2eaa54,
+  ground: 0x3fae4c,
+  groundDark: 0x35a044,
+  groundLight: 0x4cbc58,
   tufts: [],
   flowers: [],
   decorTint: [1, 1, 1],
@@ -30,6 +30,15 @@ const GRASS: MapPalette = {
   road: 0,
   roadEdge: 0,
 };
+
+/** Instances of one prop that grow in (meadow) or wither away (wild) as a land is claimed. */
+interface Patch {
+  meshes: THREE.InstancedMesh[];
+  /** Per instance: placement and the sub-mesh's own transform inside the prop. */
+  places: THREE.Matrix4[];
+  parts: THREE.Matrix4[];
+  wither: boolean;
+}
 
 interface LandFx {
   land: Land;
@@ -40,10 +49,7 @@ interface LandFx {
   growing: boolean;
   ox: number;
   oz: number;
-  tufts: THREE.InstancedMesh;
-  tuftBase: THREE.Matrix4[];
-  flowers: THREE.InstancedMesh;
-  flowerBase: THREE.Matrix4[];
+  patches: Patch[];
   wild: THREE.Object3D[];
   lush: THREE.Object3D[];
 }
@@ -52,8 +58,6 @@ const m4 = new THREE.Matrix4();
 const v = new THREE.Vector3();
 const q = new THREE.Quaternion();
 const s = new THREE.Vector3();
-const e = new THREE.Euler();
-const col = new THREE.Color();
 
 export class Territory {
   readonly root = new THREE.Group();
@@ -65,6 +69,9 @@ export class Territory {
   private clouds: { o: THREE.Object3D; phase: number; base: THREE.Vector3 }[] = [];
   private time = 0;
   private dirty = true;
+  /** Geometry and materials we created (asset-library geometry is shared and must survive). */
+  private owned: { dispose(): void }[] = [];
+  private fades: { o: THREE.Object3D; mats: THREE.MeshStandardMaterial[]; a: number }[] = [];
 
   constructor(
     parent: THREE.Object3D,
@@ -80,7 +87,7 @@ export class Territory {
     grassTex.repeat.set(EXTENT / 9, EXTENT / 9);
     const mat = detailize(
       new THREE.MeshStandardMaterial({ map: grassTex, alphaMap: this.mask, transparent: true, depthWrite: false, roughness: 0.95 }),
-      0.1,
+      0.08,
       0.6,
     );
     this.grass = new THREE.Mesh(new THREE.PlaneGeometry(EXTENT, EXTENT), mat);
@@ -89,168 +96,183 @@ export class Territory {
     this.grass.receiveShadow = true;
     this.grass.renderOrder = 1;
     this.root.add(this.grass);
+    this.owned.push(this.grass.geometry, mat, grassTex);
 
     const rng = mulberry32(99);
-    // Wild props take the kingdom's tint.
-    const tints = new Map<string, THREE.Material>();
-    const tint = (o: THREE.Object3D, rgb: [number, number, number]) => {
-      o.traverse((c) => {
-        const m = c as THREE.Mesh;
-        if (!m.isMesh) return;
-        const src = m.material as THREE.MeshStandardMaterial;
-        const key = `${src.uuid}|${rgb.join(',')}`;
-        let t = tints.get(key);
-        if (!t) {
-          const mm = src.clone();
-          mm.color.setRGB(rgb[0], rgb[1], rgb[2]);
-          t = mm;
-          tints.set(key, t);
-        }
-        m.material = t;
-      });
-      return o;
-    };
-    const dt = pal.decorTint;
-    // The untamed forest is darker and gloomier than the claimed meadows.
-    // Dark teal pines of the untamed forest.
-    const wildTint: [number, number, number] = [dt[0] * 0.42, dt[1] * 0.68, dt[2] * 0.66];
     const clear = (x: number, z: number, pad: number) => {
       for (const c of keepClear) if (Math.hypot(x - c.x, z - c.z) < c.r + pad) return false;
       for (const sp of SPOTS) if (Math.hypot(x - sp.x, z - sp.z) < 3.4 + pad) return false;
       if (Math.hypot(x, z) < 6 + pad) return false;
       return true;
     };
-    // Close to a fence line? Keep fences free of trees.
-    const nearFence = (x: number, z: number) => {
-      const fx = Math.abs(((x + 10) % 20 + 20) % 20 - 10);
-      const fz = Math.abs(((z + 10) % 20 + 20) % 20 - 10);
-      return 10 - fx < 1.8 || 10 - fz < 1.8;
+    // Keep fence lines free of trees.
+    const nearFence = (x: number, z: number, pad = 1.8) => {
+      const fx = Math.abs((((x + 10) % 20) + 20) % 20 - 10);
+      const fz = Math.abs((((z + 10) % 20) + 20) % 20 - 10);
+      return 10 - fx < pad || 10 - fz < pad;
     };
-
-    // Tuft and flower geometry, shared by every land.
-    const parts: THREE.BufferGeometry[] = [];
-    for (let i = 0; i < 6; i++) {
-      const blade = new THREE.ConeGeometry(0.05, 0.55, 3);
-      blade.translate(0, 0.27, 0);
-      blade.rotateZ((i - 2.5) * 0.25);
-      blade.rotateY(i * 1.1);
-      parts.push(blade.toNonIndexed());
-      blade.dispose();
-    }
-    const tuftGeo = mergeGeometries(parts)!;
-    const flowerGeo = new THREE.IcosahedronGeometry(0.1, 0).translate(0, 0.3, 0);
-    const tuftMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
-    const flowerMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
-    const tuftCols = [0x2c9a4e, 0x3cae5c, 0x4fc06a, 0x258a44];
-    const flowerCols = [0xffffff, 0xffe066, 0xff8fb1, 0xb69cff, 0xff6b5b];
+    const tint = pal.decorTint;
 
     for (const land of LANDS) {
-      const nT = 300;
-      const nF = 90;
-      const tufts = new THREE.InstancedMesh(tuftGeo, tuftMat, nT);
-      const flowers = new THREE.InstancedMesh(flowerGeo, flowerMat, nF);
-      const tuftBase: THREE.Matrix4[] = [];
-      const flowerBase: THREE.Matrix4[] = [];
-      for (let i = 0; i < nT; i++) {
-        const x = land.x0 + 0.6 + rng() * 18.8;
-        const z = land.z0 + 0.6 + rng() * 18.8;
-        const sc = 0.6 + rng() * 0.9;
-        tuftBase.push(new THREE.Matrix4().compose(v.set(x, 0, z), q.setFromEuler(e.set(0, rng() * 6, 0)), s.set(sc, sc, sc)));
-        tufts.setColorAt(i, col.set(tuftCols[Math.floor(rng() * tuftCols.length)]));
-      }
-      for (let i = 0; i < nF; i++) {
-        const x = land.x0 + 1 + rng() * 18;
-        const z = land.z0 + 1 + rng() * 18;
-        const sc = 0.8 + rng() * 0.6;
-        flowerBase.push(new THREE.Matrix4().compose(v.set(x, 0, z), q.identity(), s.set(sc, sc, sc)));
-        flowers.setColorAt(i, col.set(flowerCols[Math.floor((i / 4) % flowerCols.length)]));
-      }
-      for (const im of [tufts, flowers]) {
-        im.count = 0;
-        im.frustumCulled = false;
-        this.root.add(im);
-      }
-      // Wild things that wither away, and lush things that sprout, when the land is claimed.
+      const inside = (pad: number) => {
+        for (let t = 0; t < 30; t++) {
+          const x = land.x0 + pad + rng() * (20 - pad * 2);
+          const z = land.z0 + pad + rng() * (20 - pad * 2);
+          if (clear(x, z, 0.2)) return [x, z] as const;
+        }
+        return null;
+      };
+      const scatter = (count: number, pad: number, fence: number) => {
+        const out: [number, number][] = [];
+        for (let i = 0; i < count; i++) {
+          const p = inside(pad);
+          if (p && !nearFence(p[0], p[1], fence)) out.push([p[0], p[1]]);
+        }
+        return out;
+      };
+      const patches: Patch[] = [];
+      // Meadow: short grass everywhere, clover and flowers in drifts.
+      patches.push(this.patch('Grass_Common_Short', 0.55, 'y', scatter(240, 0.4, 0), rng, 0.7, 1.3, false));
+      patches.push(this.patch('Clover_1', 0.5, 'max', scatter(26, 1, 0.6), rng, 0.8, 1.4, false));
+      patches.push(this.patch('Flower_3_Group', 0.7, 'max', scatter(22, 1, 0.6), rng, 0.8, 1.3, false));
+      patches.push(this.patch('Flower_4_Group', 0.75, 'max', scatter(16, 1, 0.6), rng, 0.8, 1.3, false));
+      // Wild: tall grass and mushrooms that wither away.
+      patches.push(this.patch('Grass_Wispy_Tall', 1.1, 'y', scatter(land.id === 0 ? 40 : 90, 0.6, 0.8), rng, 0.8, 1.4, true, tint));
+      patches.push(this.patch('Mushroom_Common', 0.45, 'max', scatter(10, 1.5, 1.2), rng, 0.7, 1.3, true));
+      for (const p of patches) if (!p.wither) for (const im of p.meshes) im.count = 0;
+
+      // Individual wild trees, rocks and ferns (fade when in front of the king).
       const wild: THREE.Object3D[] = [];
-      const lush: THREE.Object3D[] = [];
-      // Thick, dark wild forest: cleared (it shrinks away) when the land is claimed.
-      for (let i = 0; i < (land.id === 0 ? 7 : 14); i++) {
-        for (let tries = 0; tries < 20; tries++) {
-          const x = land.x0 + 1.5 + rng() * 17;
-          const z = land.z0 + 1.5 + rng() * 17;
-          if (!clear(x, z, 0.3) || nearFence(x, z)) continue;
-          if (wild.some((w) => Math.hypot(w.position.x - x, w.position.z - z) < 1.6)) continue;
-          const r = rng();
-          const o =
-            r < 0.62
-              ? assets.prop(WILD_TREES[Math.floor(rng() * WILD_TREES.length)], 2.4 + rng() * 1.8)
-              : r < 0.86
-                ? assets.prop('Bush_1_A_Color1', 0.9 + rng() * 0.6, 'max')
-                : assets.prop(['Rock_1_A_Color1', 'Rock_3_C_Color1'][Math.floor(rng() * 2)], 0.7 + rng() * 0.9, 'max');
-          tint(o, wildTint);
-          o.position.set(x, 0, z);
+      const addWild = (name: string, size: number, axis: 'y' | 'max', minGap: number) => {
+        for (let t = 0; t < 20; t++) {
+          const p = inside(1.6);
+          if (!p || nearFence(p[0], p[1])) continue;
+          if (wild.some((w) => Math.hypot(w.position.x - p[0], w.position.z - p[1]) < minGap)) continue;
+          const o = this.assets.prop(name, size, axis);
+          o.position.set(p[0], 0, p[1]);
           o.rotation.y = rng() * 6.28;
           o.userData.s = o.scale.x;
           this.root.add(o);
+          this.fadeable(o, tint);
           wild.push(o);
-          this.fadeable(o);
-          break;
+          return;
         }
+      };
+      const trees = land.id === 0 ? 5 : 11;
+      for (let i = 0; i < trees; i++) addWild(WILD_TREES[Math.floor(rng() * WILD_TREES.length)], 3.4 + rng() * 2.4, 'y', 2.2);
+      for (let i = 0; i < 4; i++) addWild(['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3'][i % 3], 0.9 + rng() * 1.1, 'max', 1.4);
+      for (let i = 0; i < 6; i++) addWild(['Fern_1', 'Plant_1_Big', 'Plant_7_Big', 'Bush_Common'][i % 4], 0.9 + rng() * 0.6, 'max', 1.2);
+
+      // A few meadow trees and flowering bushes pop up once the land is yours.
+      const lush: THREE.Object3D[] = [];
+      for (let i = 0; i < 6; i++) {
+        const p = inside(2);
+        if (!p || nearFence(p[0], p[1], 2.2)) continue;
+        const tree = i < 3;
+        const o = this.assets.prop(tree ? MEADOW_TREES[i % MEADOW_TREES.length] : 'Bush_Common_Flowers', tree ? 3.6 + rng() * 1.4 : 1.1 + rng() * 0.4, tree ? 'y' : 'max');
+        o.position.set(p[0], 0, p[1]);
+        o.rotation.y = rng() * 6.28;
+        o.userData.s = o.scale.x;
+        o.scale.setScalar(0.001);
+        o.visible = false;
+        this.root.add(o);
+        this.fadeable(o, [1, 1, 1]);
+        lush.push(o);
       }
-      for (let i = 0; i < 8; i++) {
-        for (let tries = 0; tries < 20; tries++) {
-          const x = land.x0 + 1.5 + rng() * 17;
-          const z = land.z0 + 1.5 + rng() * 17;
-          if (!clear(x, z, 1) || nearFence(x, z)) continue;
-          const r = rng();
-          const o =
-            r < 0.4
-              ? assets.prop(['trees_A_medium', 'trees_B_medium', 'tree_single_A', 'tree_single_B', 'Tree_1_A_Color1', 'Tree_3_A_Color1'][Math.floor(rng() * 6)], 2.2 + rng() * 1.6)
-              : assets.prop('Bush_1_A_Color1', 0.8 + rng() * 0.5, 'max');
-          if (dt[0] !== 1 || dt[2] !== 1) tint(o, dt);
-          o.position.set(x, 0, z);
-          o.rotation.y = rng() * 6.28;
-          o.userData.s = o.scale.x;
-          o.scale.setScalar(0.001);
-          o.visible = false;
-          this.root.add(o);
-          lush.push(o);
-          this.fadeable(o);
-          break;
-        }
-      }
-      this.lands.push({ land, p: 0, R: 0, growing: false, ox: 0, oz: 0, tufts, tuftBase, flowers, flowerBase, wild, lush });
+      this.lands.push({ land, p: 0, R: 0, growing: false, ox: 0, oz: 0, patches, wild, lush });
     }
 
     this.outskirts(pal, rng);
     this.redraw();
   }
 
-  /** Pines all around the lands, then chunky rock cliffs walling in the valley, then mist. */
-  private outskirts(pal: MapPalette, rng: () => number) {
-    const dt = pal.decorTint;
-    const spots: [number, number, number][] = [];
-    for (let i = 0; i < 900 && spots.length < 260; i++) {
-      const x = (rng() - 0.5) * 120;
-      const z = (rng() - 0.5) * 120;
-      const d = Math.max(Math.abs(x), Math.abs(z));
-      if (d < 31.5 || d > 58) continue;
-      // Low on the camera side so they never hide the king.
-      const near = x > 31 || z > 31;
-      const h = near ? 1.6 + rng() * 1.4 : 2.4 + rng() * 2.6;
-      if (spots.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 1.3)) continue;
-      spots.push([x, z, h]);
-    }
-    this.root.add(makePines(spots, [dt[0], dt[1], dt[2]]));
-    const shade = (c: number) => new THREE.Color(c).multiply(new THREE.Color(dt[0], dt[1], dt[2])).getHex();
-    this.root.add(makeCliffRing(rng, 39, 62, { top: shade(0xcfcde0), side: shade(0x9a9ab6), low: shade(0x6a6a88) }));
+  /**
+   * Places many copies of a prop as instanced meshes (one per sub-mesh). `spots` are x/z positions;
+   * each gets a random turn and a scale between lo and hi.
+   */
+  private patch(name: string, size: number, axis: 'y' | 'max', spots: [number, number][], rng: () => number, lo: number, hi: number, wither: boolean, tint?: [number, number, number]): Patch {
+    const proto = this.assets.prop(name, size, axis);
+    proto.updateMatrixWorld(true);
+    const places = spots.map(([x, z]) => {
+      const sc = lo + rng() * (hi - lo);
+      return new THREE.Matrix4().compose(v.set(x, 0, z), q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rng() * 6.28), s.set(sc, sc, sc));
+    });
+    const meshes: THREE.InstancedMesh[] = [];
+    const parts: THREE.Matrix4[] = [];
+    proto.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      let mat = m.material as THREE.Material;
+      if (tint && (tint[0] !== 1 || tint[2] !== 1)) {
+        const c = (mat as THREE.MeshStandardMaterial).clone();
+        c.color.multiply(new THREE.Color(tint[0], tint[1], tint[2]));
+        this.owned.push(c);
+        mat = c;
+      }
+      const im = new THREE.InstancedMesh(m.geometry, mat, Math.max(1, places.length));
+      places.forEach((p, i) => im.setMatrixAt(i, m4.multiplyMatrices(p, m.matrixWorld)));
+      im.count = places.length;
+      im.receiveShadow = true;
+      im.frustumCulled = false;
+      this.root.add(im);
+      meshes.push(im);
+      parts.push(m.matrixWorld.clone());
+    });
+    return { meshes, places, parts, wither };
+  }
 
-    // Fog banks: big soft clouds sitting on the ground beyond the edge of the realm.
+  /** Deep woods and big mossy boulders walling in the valley, then a ring of mist. */
+  private outskirts(pal: MapPalette, rng: () => number) {
+    const stage = new THREE.Group();
+    const add = (name: string, size: number, axis: 'y' | 'max', x: number, z: number) => {
+      const o = this.assets.prop(name, size, axis);
+      o.position.set(x, 0, z);
+      o.rotation.y = rng() * 6.28;
+      stage.add(o);
+    };
+    const spots: [number, number][] = [];
+    const ok = (x: number, z: number, gap: number) => !spots.some(([a, b]) => Math.hypot(a - x, b - z) < gap);
+    for (let i = 0; i < 2200 && spots.length < 230; i++) {
+      const x = (rng() - 0.5) * 112;
+      const z = (rng() - 0.5) * 112;
+      const d = Math.max(Math.abs(x), Math.abs(z));
+      if (d < 32 || !ok(x, z, 2.6)) continue;
+      // Low growth only on the camera side near the edge, so nothing hides the king.
+      const near = (x > 31 && x < 42) || (z > 31 && z < 42);
+      spots.push([x, z]);
+      if (near) add(rng() > 0.5 ? 'Bush_Common' : 'Fern_1', 1.2 + rng() * 0.8, 'max', x, z);
+      else add(['Pine_5', 'Pine_4', 'Pine_2', 'CommonTree_5', 'CommonTree_3'][Math.floor(rng() * 5)], 4.5 + rng() * 3.5, 'y', x, z);
+    }
+    // Boulders: big on the far sides like valley walls, small on the camera side.
+    for (let i = 0; i < 90; i++) {
+      const x = (rng() - 0.5) * 130;
+      const z = (rng() - 0.5) * 130;
+      const d = Math.max(Math.abs(x), Math.abs(z));
+      if (d < 44 || d > 64) continue;
+      const near = x > 40 || z > 40;
+      add(['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3'][i % 3], near ? 3 + rng() * 3 : 9 + rng() * 9, 'max', x, z);
+    }
+    for (let i = 0; i < 60; i++) {
+      const x = (rng() - 0.5) * 80;
+      const z = (rng() - 0.5) * 80;
+      const d = Math.max(Math.abs(x), Math.abs(z));
+      if (d < 31 || d > 38) continue;
+      add(['Rock_Medium_2', 'Fern_1', 'Plant_7_Big'][i % 3], 0.8 + rng() * 0.8, 'max', x, z);
+    }
+    const baked = bakeStatic(stage, pal.decorTint);
+    baked.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) this.owned.push(m.geometry);
+    });
+    this.root.add(baked);
+
+    // Mist: big soft clouds sitting on the ground beyond the edge of the realm.
     const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.92, emissive: 0xffffff, emissiveIntensity: 0.35 });
+    this.owned.push(cloudMat);
     for (let i = 0; i < 46; i++) {
       const side = i % 4;
       const t = (rng() - 0.5) * 2 * (BOUNDS + 16);
-      const out = BOUNDS + 22 + rng() * 10;
+      const out = BOUNDS + 24 + rng() * 10;
       const x = side === 0 ? t : side === 1 ? t : side === 2 ? out : -out;
       const z = side === 0 ? out : side === 1 ? -out : t;
       const c = this.assets.prop(rng() > 0.5 ? 'cloud_big' : 'cloud_small', 12 + rng() * 9, 'max');
@@ -268,17 +290,17 @@ export class Territory {
     }
   }
 
-  private fades: { o: THREE.Object3D; mats: THREE.MeshStandardMaterial[]; a: number }[] = [];
-
   /** Gives a prop its own materials so it can turn see-through when it stands between camera and king. */
-  private fadeable(o: THREE.Object3D) {
+  private fadeable(o: THREE.Object3D, tint: [number, number, number]) {
     const mats: THREE.MeshStandardMaterial[] = [];
     o.traverse((c) => {
       const m = c as THREE.Mesh;
       if (!m.isMesh) return;
       const mm = (m.material as THREE.MeshStandardMaterial).clone();
+      mm.color.multiply(new THREE.Color(tint[0], tint[1], tint[2]));
       m.material = mm;
       mats.push(mm);
+      this.owned.push(mm);
     });
     this.fades.push({ o, mats, a: 1 });
   }
@@ -292,7 +314,7 @@ export class Territory {
       const dz = f.o.position.z - focus.z;
       const along = (dx + dz) * k;
       const side = Math.abs(dx - dz) * k;
-      const want = along > -0.5 && along < 11 && side < 2.6 + along * 0.12 ? 0.22 : 1;
+      const want = along > -0.5 && along < 11 && side < 2.6 + along * 0.12 ? 0.25 : 1;
       if (want === f.a) continue;
       f.a = want < f.a ? Math.max(want, f.a - dt * 4) : Math.min(want, f.a + dt * 3);
       for (const m of f.mats) {
@@ -312,10 +334,6 @@ export class Territory {
     L.oz = z;
     if (instant) L.p = 0.995;
     for (const o of L.lush) o.visible = true;
-  }
-
-  isGreen(id: number) {
-    return (this.lands[id]?.p ?? 0) > 0.5;
   }
 
   update(dt: number) {
@@ -338,30 +356,29 @@ export class Territory {
         Math.hypot(land.x1 - L.ox, land.z1 - L.oz),
       );
       const R = (L.R = L.p * (far + 2));
-      const grow = (base: THREE.Matrix4[], im: THREE.InstancedMesh) => {
-        let n = 0;
-        base.forEach((b, i) => {
-          v.setFromMatrixPosition(b);
-          const k = THREE.MathUtils.clamp((R - Math.hypot(v.x - L.ox, v.z - L.oz)) / 2.5, 0, 1);
-          const pop = k < 1 ? k * (1 + Math.sin(k * Math.PI) * 0.4) : 1;
-          b.decompose(v, q, s);
-          m4.compose(v, q, s.multiplyScalar(Math.max(0.001, pop)));
-          im.setMatrixAt(i, m4);
-          n = i + 1;
+      const reach = (x: number, z: number, soft: number) => THREE.MathUtils.clamp((R - Math.hypot(x - L.ox, z - L.oz)) / soft, 0, 1);
+      for (const P of L.patches) {
+        P.meshes.forEach((im, mi) => {
+          P.places.forEach((p, i) => {
+            v.setFromMatrixPosition(p);
+            const k = reach(v.x, v.z, 2.5);
+            const sc = P.wither ? 1 - k : k < 1 ? k * (1 + Math.sin(k * Math.PI) * 0.4) : 1;
+            p.decompose(v, q, s);
+            m4.compose(v, q, s.multiplyScalar(Math.max(0.001, sc)));
+            im.setMatrixAt(i, m4.multiply(P.parts[mi]));
+          });
+          im.count = P.places.length;
+          im.instanceMatrix.needsUpdate = true;
+          im.visible = !(P.wither && L.p >= 1);
         });
-        im.count = n;
-        im.instanceMatrix.needsUpdate = true;
-        if (im.instanceColor) im.instanceColor.needsUpdate = true;
-      };
-      grow(L.tuftBase, L.tufts);
-      grow(L.flowerBase, L.flowers);
+      }
       for (const o of L.wild) {
-        const k = THREE.MathUtils.clamp((R - Math.hypot(o.position.x - L.ox, o.position.z - L.oz)) / 2, 0, 1);
+        const k = reach(o.position.x, o.position.z, 2);
         o.scale.setScalar(Math.max(0.001, o.userData.s * (1 - k)));
         o.visible = k < 1;
       }
       for (const o of L.lush) {
-        const k = THREE.MathUtils.clamp((R - Math.hypot(o.position.x - L.ox, o.position.z - L.oz)) / 2, 0, 1);
+        const k = reach(o.position.x, o.position.z, 2);
         const pop = k < 1 ? k * (1 + Math.sin(k * Math.PI) * 0.35) : 1;
         o.scale.setScalar(Math.max(0.001, o.userData.s * pop));
       }
@@ -397,12 +414,9 @@ export class Territory {
   dispose(parent: THREE.Object3D) {
     parent.remove(this.root);
     this.mask.dispose();
+    for (const o of this.owned) o.dispose();
     this.root.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh && m.geometry && !(m.geometry as THREE.BufferGeometry & { shared?: boolean }).shared) {
-        // Props share geometry with the asset library; only dispose what we made ourselves.
-        if (m === this.grass || (o as THREE.InstancedMesh).isInstancedMesh) m.geometry.dispose();
-      }
+      if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose();
     });
   }
 }
