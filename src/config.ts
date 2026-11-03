@@ -40,11 +40,11 @@ export const COLORS = {
 
 export const PLAYER = {
   speed: 7,
-  maxHp: 150,
+  maxHp: 120,
   regen: 10,
-  range: 8,
-  baseDamage: 20,
-  fireDelay: 0.3,
+  range: 7,
+  baseDamage: 16,
+  fireDelay: 0.36,
   magnet: 3.6,
   /** Seconds before an uncollected coin flies to the hero by itself. */
   coinAutoCollect: 6,
@@ -74,7 +74,7 @@ export const BOW_TIERS = [
   { name: 'Gold Crossbow', damage: 52, color: 0xffcf3d },
 ];
 
-export const ARCHER = { range: 9.5, delay: 0.6 };
+export const ARCHER = { range: 10, delay: 0.55 };
 export const KNIGHT = { maxHp: 110, hpPerTier: 35, delay: 0.75, reach: 1.7, regen: 6 };
 
 /** Watchtower per level: archer slots, and whether a ballista is mounted. */
@@ -102,8 +102,8 @@ export interface EnemyType {
 }
 
 export const ENEMIES: Record<EnemyKind, EnemyType> = {
-  goblin: { hp: 28, speed: 2.5, damage: 9, radius: 0.42, coin: 1 },
-  runner: { hp: 18, speed: 4.3, damage: 7, radius: 0.36, coin: 1 },
+  goblin: { hp: 24, speed: 2.4, damage: 9, radius: 0.42, coin: 1 },
+  runner: { hp: 18, speed: 4.2, damage: 8, radius: 0.38, coin: 1 },
   troll: { hp: 520, speed: 1.3, damage: 34, radius: 1.05, coin: 20, boss: true },
 };
 
@@ -112,7 +112,7 @@ export const WAVES = {
   duration: 22,
   breakTime: 3,
   baseCount: 14,
-  countPerWave: 8,
+  countPerWave: 9,
   hpGrowth: 0.13,
   roadBWave: 7,
 };
@@ -156,6 +156,8 @@ export type PlotKind =
   | 'camp'
   | 'quarry'
   | 'farm'
+  | 'goldmine'
+  | 'wall'
   | 'castle';
 
 /** Where a plot sits: fixed coordinates, or beside/on a road at a fraction of its length. */
@@ -201,18 +203,20 @@ export const PLOTS: PlotDef[] = [
   { id: 'gp3', kind: 'post', place: { road: 1, t: 0.68, side: 0, dist: 0 }, costs: [35, 90], requires: ['roadB'] },
   { id: 'bar3', kind: 'barricade', place: { road: 1, t: 0.74, side: 0, dist: 0 }, costs: [25], requires: ['roadB'] },
   // --- Kingdom ---
-  { id: 'camp', kind: 'camp', place: { x: -15, z: -11 }, costs: [22, 65, 150], requires: ['tw2'] },
-  { id: 'quarry', kind: 'quarry', place: { x: -19, z: 10 }, costs: [35, 90, 190], wood: [12, 28, 55], requires: ['castle'] },
+  { id: 'camp', kind: 'camp', place: { x: -15, z: -11 }, costs: [22, 65, 150], requires: ['tw1'] },
+  { id: 'quarry', kind: 'quarry', place: { x: -19, z: 10 }, costs: [35, 90, 190], wood: [12, 28, 55], requires: ['camp', 'castle'] },
   // One castle plot drives the whole kingdom: castle model, town walls, gates and houses.
   {
     id: 'castle',
     kind: 'castle',
     place: { x: -4.6, z: 4.8 },
-    costs: [25, 70, 140, 250, 420],
-    wood: [12, 30, 40, 60, 100],
-    stone: [0, 0, 35, 90, 160],
-    requires: ['camp'],
+    costs: [20, 60, 130, 240, 400],
+    wood: [0, 25, 40, 60, 100],
+    stone: [0, 0, 30, 80, 150],
+    requires: [],
   },
+  // Gold mine: miners pile up gold bars for the king to collect.
+  { id: 'goldmine', kind: 'goldmine', place: { x: 10.5, z: -4.5 }, costs: [35, 90, 200], wood: [8, 25, 50], requires: ['castle'] },
   { id: 'farm', kind: 'farm', place: { x: -21, z: -2 }, costs: [25, 70, 150], wood: [10, 25, 50], requires: ['range'] },
   { id: 'tw7', kind: 'tower', place: { road: 0, t: 0.18, side: 1, dist: 3.8 }, costs: [50, 110, 230], requires: ['tw4', 'wave:6'] },
   { id: 'tw8', kind: 'tower', place: { road: 1, t: 0.32, side: 1, dist: 3.8 }, costs: [55, 120, 240], requires: ['tw6', 'roadB'] },
@@ -225,7 +229,7 @@ export const ROADSIDE_PAD = { side: -1, dist: 3.6 };
 
 /** The castle grows from a log camp to a citadel; town walls, gates and houses grow with it. */
 export const CASTLE_LEVELS = [
-  { name: 'Camp', hp: 700, builders: 1, villagers: 2, walls: 0, radius: 2.2 },
+  { name: 'Camp', hp: 900, builders: 1, villagers: 2, walls: 0, radius: 2.2 },
   { name: 'Wooden Hall', hp: 1000, builders: 1, villagers: 3, walls: 1, radius: 2.4 },
   { name: 'Timber Fort', hp: 1400, builders: 2, villagers: 4, walls: 2, radius: 2.8 },
   { name: 'Stone Keep', hp: 1900, builders: 2, villagers: 6, walls: 3, radius: 2.8 },
@@ -313,8 +317,8 @@ export const KINGDOMS: KingdomMap[] = [
     name: 'Greenvale',
     blurb: 'Rolling meadows. The goblins are only testing you.',
     waves: 10,
-    hpMul: 1.05,
-    countMul: 1,
+    hpMul: 1,
+    countMul: 0.9,
     roadBWave: 7,
     roads: ROADS,
     palette: MEADOW,
@@ -469,3 +473,20 @@ export type GearId = (typeof GEAR)[number]['id'];
 export const GEAR_COSTS = [20, 45, 80, 130, 200];
 /** Crowns earned: per wave survived, and for winning a kingdom. */
 export const CROWNS = { perWave: (k: number) => 2 + k, victory: (k: number) => 40 * (k + 1) };
+
+/** The kingdom wall: a ring of sections the king builds one by one, upgraded with the castle. */
+export const KINGDOM_WALL = {
+  cx: 0,
+  cz: 2.5,
+  r: 15,
+  sections: 12,
+  /** Goblins leave the roads this far outside the wall and storm it across open ground. */
+  assault: 10,
+  baseCost: 14,
+  costStep: 4,
+  hp: { wood: 320, stone: 850, castle: 1600, citadel: 2300 },
+};
+export const wallTierFor = (castleLevel: number) =>
+  castleLevel >= 5 ? 'citadel' : castleLevel >= 4 ? 'castle' : castleLevel >= 3 ? 'stone' : 'wood';
+
+export const GOLD_MINE = { barsPerTrip: 2, barValue: 2, pileMax: 40, mineTime: 3.4 };

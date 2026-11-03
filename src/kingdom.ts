@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CASTLE_LEVELS, WORKERS } from './config';
+import { CASTLE_LEVELS, GOLD_MINE, WORKERS } from './config';
 import type { CharRig } from './assets';
 import * as S from './structures';
 import type { Fx } from './fx';
@@ -20,7 +20,7 @@ export interface Repairable {
   rebuildable: boolean;
 }
 
-type Job = 'wood' | 'stone' | 'builder' | 'villager' | 'farmer';
+type Job = 'wood' | 'stone' | 'builder' | 'villager' | 'farmer' | 'gold';
 
 interface Npc {
   job: Job;
@@ -144,13 +144,20 @@ export class Kingdom {
   buildQuarry(pos: THREE.Vector3, level: number) {
     if (!this.quarry) {
       const root = new THREE.Group();
-      const b = S.prop('building_mine_blue', 4.8, 'max');
-      b.rotation.y = Math.PI;
-      root.add(b);
+      // An open rock face with scaffolding: miners chip stone out in the open.
+      const face = S.prop('rock_single_A', 4.2, 'max');
+      face.position.set(0, 0, -1.2);
+      root.add(face);
+      const sc = S.prop('building_scaffolding', 3.2, 'max');
+      sc.position.set(2.6, 0, -0.6);
+      root.add(sc);
+      const big = S.prop('resource-stone-large', 1.4, 'max');
+      big.position.set(-2.4, 0, 1.4);
+      root.add(big);
       for (const [x, z, s] of [
         [-3.2, -1.5, 1.3],
         [3.4, -0.8, 1.1],
-        [-2.6, 2.2, 0.8],
+        [-1.2, 2.6, 0.8],
       ]) {
         const r = S.prop('rock_single_' + 'ABCDE'[Math.floor(Math.abs(x * 7)) % 5], s, 'max');
         r.position.set(x, 0, z);
@@ -163,7 +170,7 @@ export class Kingdom {
         pos: pos.clone(),
         level,
         drop: pos.clone().add(new THREE.Vector3(2.6, 0, 2.6)),
-        door: pos.clone().add(new THREE.Vector3(0, 0, 2.5)),
+        door: pos.clone().add(new THREE.Vector3(0, 0, 1.4)),
         pile: [],
       };
     }
@@ -171,6 +178,114 @@ export class Kingdom {
     this.syncPopulation();
     this.refreshPiles();
   }
+
+  /** Gold bars waiting at the gold mine for the king to collect. */
+  goldBars = 0;
+  goldmine: Site | null = null;
+  private barMeshes: THREE.Object3D[] = [];
+
+  buildGoldMine(pos: THREE.Vector3, level: number) {
+    if (!this.goldmine) {
+      const root = new THREE.Group();
+      const b = S.prop('building_mine_blue', 4.8, 'max');
+      b.rotation.y = Math.PI;
+      root.add(b);
+      root.position.copy(pos);
+      this.root.add(root);
+      this.goldmine = {
+        root,
+        pos: pos.clone(),
+        level,
+        drop: pos.clone().add(new THREE.Vector3(-2.4, 0, 2.6)),
+        door: pos.clone().add(new THREE.Vector3(0, 0, 2.6)),
+        pile: [],
+      };
+    }
+    this.goldmine.level = level;
+    this.syncPopulation();
+  }
+
+  /** Bars stack up into gleaming piles (KayKit gold bars). */
+  private refreshBars() {
+    const site = this.goldmine;
+    if (!site) return;
+    const want = Math.min(12, Math.ceil(this.goldBars / 3));
+    while (this.barMeshes.length < want) {
+      const i = this.barMeshes.length;
+      const m = S.prop(i % 3 === 2 ? 'Gold_Bars_Stack_Large' : 'Gold_Bars_Stack_Small', 0.9, 'max');
+      m.position.set(site.drop.x + (i % 4) * 0.8 - 1.2, Math.floor(i / 4) * 0.3, site.drop.z + (Math.floor(i / 4) % 2) * 0.5);
+      m.rotation.y = i * 0.7;
+      this.root.add(m);
+      this.barMeshes.push(m);
+    }
+    while (this.barMeshes.length > want) this.root.remove(this.barMeshes.pop()!);
+  }
+
+  /** The king scoops up waiting gold bars. Returns how many were taken. */
+  takeBars(max: number) {
+    const n = Math.min(max, this.goldBars);
+    this.goldBars -= n;
+    this.refreshBars();
+    return n;
+  }
+
+  private goldMiner(n: Npc, dt: number) {
+    const m = this.goldmine!;
+    switch (n.state) {
+      case 'idle':
+        n.t -= dt;
+        n.char.loop('Idle');
+        if (n.t <= 0) {
+          n.state = 'toMine';
+          n.target = m.door!.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0, 0));
+        }
+        break;
+      case 'toMine':
+        if (this.walk(n, n.target!, dt)) {
+          n.state = 'inside';
+          n.t = GOLD_MINE.mineTime;
+          n.char.root.visible = false;
+        }
+        break;
+      case 'inside':
+        n.t -= dt;
+        if (Math.random() < dt * 3) this.fx.p.sparkle(m.door!.clone().setY(1), 0xffd34d, 1);
+        if (Math.random() < dt * 1.2) this.sfx.hit();
+        if (n.t <= 0) {
+          n.char.root.visible = true;
+          this.setCarry(n, 'Gold_Bar', 0.6);
+          n.state = 'toPile';
+          n.target = m.drop.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0, 0.8));
+        }
+        break;
+      case 'toPile':
+        if (this.walk(n, n.target!, dt, WORKERS.speed * 0.85)) {
+          if (this.goldBars < GOLD_MINE.pileMax) this.goldBars += GOLD_MINE.barsPerTrip;
+          this.setCarry(n, null);
+          this.ev.text(n.pos.clone().setY(2.4), `+${GOLD_MINE.barsPerTrip} gold bars`, 'gold');
+          this.fx.p.coinBurst(n.pos.clone().setY(1));
+          this.sfx.pay(0.8);
+          this.refreshBars();
+          n.state = 'idle';
+          n.t = 0.6;
+        }
+        break;
+    }
+  }
+
+  /** Swap farm buildings to the stone era (windmill). */
+  setEra(era: 'wood' | 'stone') {
+    if (era === 'stone' && this.farm && !this.farmStone) {
+      this.farmStone = true;
+      const mill = S.prop('building_windmill_blue', 5.2, 'max');
+      mill.rotation.y = Math.PI;
+      mill.position.set(0, 0, -0.6);
+      this.farm.root.clear();
+      this.farm.root.add(mill);
+      this.risers.push({ obj: mill, t: 0 });
+    }
+  }
+  private farmStone = false;
 
   setCastleLevel(level: number) {
     this.castleLevel = level;
@@ -196,9 +311,11 @@ export class Kingdom {
   buildFarm(pos: THREE.Vector3, level: number) {
     if (!this.farm) {
       const root = new THREE.Group();
-      const mill = S.prop('building_windmill_blue', 5.2, 'max');
-      mill.rotation.y = Math.PI;
-      root.add(mill);
+      const shed = S.prop('structure-roof', 2.6, 'max');
+      root.add(shed);
+      const pile = S.prop('Food_Pile_Large', 1.2, 'max');
+      pile.position.set(-1.4, 0, 1.2);
+      root.add(pile);
       root.position.copy(pos);
       this.root.add(root);
       this.farm = { root, pos: pos.clone(), level, drop: pos.clone().add(new THREE.Vector3(2.2, 0, 2.4)), pile: [] };
@@ -303,6 +420,7 @@ export class Kingdom {
       builder: CASTLE_LEVELS[this.castleLevel].builders,
       villager: CASTLE_LEVELS[this.castleLevel].villagers,
       farmer: this.farm ? WORKERS.perLevel[Math.min(this.farm.level, 2)] : 0,
+      gold: this.goldmine ? WORKERS.perLevel[Math.min(this.goldmine.level, 2)] : 0,
     };
     for (const job of Object.keys(want) as Job[]) {
       while (this.count(job) < want[job]) this.spawn(job);
@@ -318,6 +436,8 @@ export class Kingdom {
           ? this.quarry.drop.clone()
           : job === 'farmer' && this.farm
             ? this.farm.drop.clone()
+            : job === 'gold' && this.goldmine
+              ? this.goldmine.drop.clone()
             : this.hallPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 4, 0, 4.5));
     char.root.position.copy(start);
     if (job !== 'wood') {
@@ -378,6 +498,9 @@ export class Kingdom {
           break;
         case 'farmer':
           this.farmer(n, dt);
+          break;
+        case 'gold':
+          this.goldMiner(n, dt);
           break;
       }
       n.char.root.position.copy(n.pos);
@@ -556,15 +679,16 @@ export class Kingdom {
         if (this.walk(n, n.target!, dt)) {
           n.state = 'inside';
           n.t = WORKERS.mineTime;
-          n.char.root.visible = false;
         }
         break;
       case 'inside':
+        // Chipping at the rock face.
         n.t -= dt;
-        if (Math.random() < dt * 3) this.fx.p.dust(q.door!.clone().setY(0.4), 1);
-        if (Math.random() < dt * 1.2) this.sfx.hit();
+        this.face(n, q.pos, dt);
+        n.char.loop('Interact');
+        if (Math.random() < dt * 4) this.fx.p.emit({ pos: q.door!.clone().setY(0.8), count: 3, color: [0xb9b6ae, 0x8d8a83, 0xffffff], speed: 3, up: 2, size: 0.16, life: 0.4, gravity: 12, glow: false });
+        if (Math.random() < dt * 1.5) this.sfx.hit();
         if (n.t <= 0) {
-          n.char.root.visible = true;
           this.setCarry(n, 'resource_stone', 0.75);
           n.state = 'toPile';
           n.target = q.drop.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0, 0.8));
@@ -728,6 +852,7 @@ export class Kingdom {
     for (const n of this.npcs) this.root.remove(n.char.root);
     for (const t of this.trees) this.root.remove(t.obj);
     for (const h of this.houses) if (h) this.root.remove(h);
+    for (const b of this.barMeshes) this.root.remove(b);
     this.npcs = [];
     this.trees = [];
   }

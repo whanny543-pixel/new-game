@@ -10,14 +10,13 @@ import archerUrl from './assets/models/archer.glb?url';
 import knightUrl from './assets/models/knight.glb?url';
 import minionUrl from './assets/models/goblin.glb?url';
 import rogueUrl from './assets/models/goblin_runner.glb?url';
-import warriorUrl from './assets/models/orc.glb?url';
 import propsUrl from './assets/models/props.glb?url';
 import workerUrl from './assets/models/worker.glb?url';
 import villagerUrl from './assets/models/villager.glb?url';
 
-// 3D models by Kay Lousberg (KayKit, CC0): www.kaylousberg.com
+// 3D models (all CC0): KayKit by Kay Lousberg, Kenney (kenney.nl), Quaternius (quaternius.com).
 
-export type CharName = 'hero' | 'archer' | 'knight' | 'minion' | 'rogue' | 'warrior' | 'worker' | 'villager';
+export type CharName = 'hero' | 'archer' | 'knight' | 'minion' | 'rogue' | 'worker' | 'villager';
 
 const CHAR_URLS: Record<CharName, string> = {
   hero: heroUrl,
@@ -25,7 +24,6 @@ const CHAR_URLS: Record<CharName, string> = {
   knight: knightUrl,
   minion: minionUrl,
   rogue: rogueUrl,
-  warrior: warriorUrl,
   worker: workerUrl,
   villager: villagerUrl,
 };

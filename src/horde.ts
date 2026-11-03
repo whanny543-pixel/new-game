@@ -25,71 +25,16 @@ interface KindSetup {
 }
 
 const SETUP: Record<EnemyKind, KindSetup> = {
-  goblin: { char: 'minion', height: 1.25, move: 'Walking_A', weapons: [] },
-  runner: { char: 'rogue', height: 1.15, move: 'Running_A', weapons: [] },
-  troll: { char: 'warrior', height: 3.3, move: 'Walking_A', weapons: [] },
+  goblin: { char: 'minion', height: 1.35, move: 'Walk', weapons: [] },
+  runner: { char: 'rogue', height: 1.25, move: 'Run', weapons: [] },
+  // The warlord is a giant skull-masked orc.
+  troll: { char: 'rogue', height: 3.6, move: 'Walk', weapons: [] },
 };
-
-/** Repaints a character atlas: skin tones become goblin green. */
-function goblinTexture(src: THREE.Texture, dark: boolean) {
-  const img = src.image as CanvasImageSource & { width: number; height: number };
-  const c = document.createElement('canvas');
-  c.width = img.width;
-  c.height = img.height;
-  const g = c.getContext('2d')!;
-  g.drawImage(img, 0, 0);
-  const data = g.getImageData(0, 0, c.width, c.height);
-  const d = data.data;
-  const skins = [
-    [246, 192, 156],
-    [248, 204, 171],
-    [242, 168, 126],
-    [231, 206, 180],
-  ];
-  let skinUv: [number, number] = [0, 0];
-  for (let i = 0; i < d.length; i += 4) {
-    const r = d[i];
-    const gg = d[i + 1];
-    const b = d[i + 2];
-    if (!skins.some(([sr, sg, sb]) => Math.abs(r - sr) + Math.abs(gg - sg) + Math.abs(b - sb) < 30)) continue;
-    const l = (r + gg + b) / 3 / 255;
-    // Orcs get a darker olive skin than goblins.
-    d[i] = (dark ? 70 : 105) * l * 1.15;
-    d[i + 1] = (dark ? 140 : 190) * l * 1.15;
-    d[i + 2] = (dark ? 50 : 60) * l * 1.15;
-    if (!skinUv[0]) {
-      const px = (i / 4) % c.width;
-      const py = Math.floor(i / 4 / c.width);
-      skinUv = [(px + 0.5) / c.width, src.flipY ? 1 - (py + 0.5) / c.height : (py + 0.5) / c.height];
-    }
-  }
-  g.putImageData(data, 0, 0);
-  const t = new THREE.CanvasTexture(c);
-  t.flipY = src.flipY;
-  t.colorSpace = src.colorSpace;
-  t.magFilter = src.magFilter;
-  t.minFilter = src.minFilter;
-  return { tex: t, skinUv };
-}
-
-/** Big pointy goblin ears on the head bone. */
-function addEars(head: THREE.Object3D, mat: THREE.Material, size: number, uv: [number, number]) {
-  for (const side of [-1, 1]) {
-    const geo = new THREE.ConeGeometry(0.11 * size, 0.55 * size, 5);
-    // Point every UV at a skin texel so the ears pick up the green from the shared atlas.
-    const uvs = geo.attributes.uv;
-    for (let i = 0; i < uvs.count; i++) uvs.setXY(i, uv[0], uv[1]);
-    const ear = new THREE.Mesh(geo, mat);
-    ear.position.set(side * 0.42 * size, 0.42 * size, -0.02);
-    ear.rotation.set(0.15, 0, side * -1.2);
-    head.add(ear);
-  }
-}
 
 const FRAMES: Record<HordeAnim, number> = { move: 14, attack: 10, death: 12, spawn: 6 };
 const CLIPS: Record<Exclude<HordeAnim, 'move'>, string> = {
-  attack: '1H_Melee_Attack_Chop',
-  death: 'Death_A',
+  attack: 'Weapon',
+  death: 'Death',
   spawn: 'Idle',
 };
 
@@ -166,23 +111,11 @@ export class Horde {
       });
       const mat = material as unknown as THREE.MeshStandardMaterial;
       mat.roughness = 0.6;
-      // Green skin and pointy ears turn the adventurer rigs into goblins (and an orc warlord).
-      let skinUv: [number, number] = [0, 0];
-      if (mat.map) {
-        const g = goblinTexture(mat.map, kind === 'troll');
-        mat.map = g.tex;
-        skinUv = g.skinUv;
-      }
-      const head = scene.getObjectByName('head');
-      if (head) addEars(head, mat, 1, skinUv);
-      if (kind === 'troll') {
-        // The warlord swings his big axe.
-        const axe = scene.getObjectByName('2H_Axe');
-        if (axe) axe.visible = true;
-      }
+      // The warlord gets a darker, blood-red tint so he reads as a boss.
+      if (kind === 'troll') mat.color.setRGB(1.15, 0.62, 0.55);
       const anims = {} as Record<HordeAnim, Baked>;
       for (const anim of Object.keys(FRAMES) as HordeAnim[]) {
-        const clipName = anim === 'move' ? s.move : anim === 'attack' && kind === 'troll' ? '2H_Melee_Attack_Chop' : CLIPS[anim];
+        const clipName = anim === 'move' ? s.move : CLIPS[anim];
         const clip = tpl.clips.find((c) => c.name === clipName) ?? tpl.clips[0];
         const loop = anim === 'move' || anim === 'attack';
         const geos = bakeClip(scene, clip, FRAMES[anim], loop);

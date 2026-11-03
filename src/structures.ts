@@ -201,10 +201,40 @@ export interface TowerRig {
   ballista: THREE.Object3D;
   base: THREE.Object3D;
   slots: THREE.Vector3[];
+  /** Wooden towers keep their platform when the ballista goes on top. */
+  keepBaseWithBallista?: boolean;
 }
 
-export function makeTower(): TowerRig {
+/** Building style follows the castle: rough timber until the Stone Keep, then stone. */
+export type Era = 'wood' | 'stone';
+export const eraFor = (castleLevel: number): Era => (castleLevel >= 3 ? 'stone' : 'wood');
+
+/** Watchtower: a timber lookout platform in the wooden era, a stone tower later. */
+export function makeTower(era: Era = 'stone'): TowerRig {
   const root = new THREE.Group();
+  if (era === 'wood') {
+    const base = A.prop('structure-floor', 2.6, 'max');
+    root.add(base);
+    const H = new THREE.Box3().setFromObject(base).max.y;
+    const roof = new THREE.Group();
+    for (const [x, z] of [
+      [-0.9, -0.9],
+      [0.9, 0.9],
+    ]) {
+      const f = A.prop('flag_blue', 1.4);
+      f.position.set(x, H, z);
+      roof.add(f);
+    }
+    roof.visible = false;
+    root.add(roof);
+    // Level 3: a ballista on the platform.
+    const ballista = A.prop('siege-ballista', 1.5, 'max');
+    ballista.position.set(0, H, 0.2);
+    ballista.visible = false;
+    root.add(ballista);
+    const slots = [new THREE.Vector3(-0.55, H, 0.45), new THREE.Vector3(0.55, H, -0.45)];
+    return { root, roof, ballista, base, slots, keepBaseWithBallista: true };
+  }
   const H = 4.6;
   const base = A.prop('building_tower_base_blue', H);
   root.add(base);
@@ -367,8 +397,49 @@ export interface WorkshopRig {
   anim?: THREE.Object3D;
 }
 
-export function makeShop(kind: 'range' | 'barracks' | 'forge' | 'bowyer'): WorkshopRig {
+export function makeShop(kind: 'range' | 'barracks' | 'forge' | 'bowyer', era: Era = 'stone'): WorkshopRig {
   const root = new THREE.Group();
+  const add = (name: string, size: number, x: number, z: number, ry = 0, axis: 'y' | 'max' = 'max') => {
+    const o = A.prop(name, size, axis);
+    o.position.set(x, 0, z);
+    o.rotation.y = ry;
+    root.add(o);
+    return o;
+  };
+  const out: WorkshopRig = { root, rack: new THREE.Vector3(0, 0, 2.7) };
+  if (era === 'wood') {
+    // Rough timber camp versions: tents, lean-tos and workbenches.
+    switch (kind) {
+      case 'range':
+        add('tent', 2.8, 0, -0.6, 0, 'max');
+        add('target', 1.3, 2.3, 0.8);
+        add('target', 1.3, -2.3, 0.8);
+        add('bucket_arrows', 0.7, 0.8, 1.6);
+        break;
+      case 'barracks':
+        add('tent', 2.8, -1.3, -0.4, 0.2);
+        add('tent', 2.4, 1.5, -0.8, -0.3);
+        add('campfire-pit', 0.9, 0.2, 1.0);
+        add('weaponrack', 1.2, 0.4, 1.6);
+        out.rack = new THREE.Vector3(0, 0, 2.6);
+        break;
+      case 'forge':
+        add('building_scaffolding', 2.8, 0, -1.0, 0, 'max');
+        add('workbench-anvil', 1.1, -0.6, 0.6);
+        add('campfire-stand', 1.1, 1.3, 0.4);
+        add('weaponrack', 1.2, 0.9, 2.1);
+        out.rack = new THREE.Vector3(0.9, 0, 2.6);
+        out.chimney = new THREE.Vector3(1.3, 1.2, 0.4);
+        break;
+      case 'bowyer':
+        add('tent', 2.6, 0, -0.8, 0, 'max');
+        add('workbench', 1.1, -0.9, 0.8);
+        add('resource-planks', 1.2, 1.5, 0.6);
+        out.rack = new THREE.Vector3(0.8, 0, 2.6);
+        break;
+    }
+    return out;
+  }
   const model = {
     range: 'building_archeryrange_blue',
     barracks: 'building_barracks_blue',
@@ -378,31 +449,78 @@ export function makeShop(kind: 'range' | 'barracks' | 'forge' | 'bowyer'): Works
   const b = A.prop(model, 4.6, 'max');
   b.rotation.y = Math.PI;
   root.add(b);
-  const out: WorkshopRig = { root, rack: new THREE.Vector3(0, 0, 2.7) };
   if (kind === 'forge') {
-    const rack = A.prop('weaponrack', 1.3);
-    rack.position.set(0.9, 0, 2.4);
-    root.add(rack);
+    add('weaponrack', 1.3, 0.9, 2.4, 0, 'y');
     out.rack = new THREE.Vector3(0.9, 0, 2.8);
     out.chimney = new THREE.Vector3(-0.6, 4.2, -0.4);
   } else if (kind === 'bowyer') {
-    const logs = A.prop('resource_lumber', 1.0);
-    logs.position.set(-1.6, 0, 2.2);
-    root.add(logs);
+    add('resource_lumber', 1.0, -1.6, 2.2, 0, 'y');
     out.rack = new THREE.Vector3(0.8, 0, 2.8);
   } else if (kind === 'range') {
-    const t = A.prop('target', 1.3);
-    t.position.set(2.4, 0, 1.4);
-    root.add(t);
-    const q = A.prop('bucket_arrows', 0.7);
-    q.position.set(-1.8, 0, 2.2);
-    root.add(q);
+    add('target', 1.3, 2.4, 1.4, 0, 'y');
+    add('bucket_arrows', 0.7, -1.8, 2.2, 0, 'y');
   } else {
-    const rack = A.prop('weaponrack', 1.2);
-    rack.position.set(-2.0, 0, 1.8);
-    root.add(rack);
+    add('weaponrack', 1.2, -2.0, 1.8, 0, 'y');
   }
   return out;
+}
+
+/**
+ * One section of the kingdom wall: an arc of wall pieces at radius r between angles a0 and a1,
+ * a gate wherever a road crosses, and a lookout post for two archers.
+ */
+export function makeWallSection(
+  tier: 'wood' | 'stone' | 'castle' | 'citadel',
+  cx: number,
+  cz: number,
+  r: number,
+  a0: number,
+  a1: number,
+  roadAngles: number[],
+  postAngle: number,
+) {
+  const g = new THREE.Group();
+  const piece = tier === 'wood' ? 'fence_wood_straight' : tier === 'stone' ? 'fence_stone_straight' : 'wall_straight';
+  const gateModel = tier === 'wood' ? 'fence_wood_straight_gate' : tier === 'stone' ? 'fence_stone_straight_gate' : 'wall_straight_gate';
+  const seg = piece === 'wall_straight' ? 2.7 : 2.25;
+  const n = Math.max(1, Math.round(((a1 - a0) * r) / seg));
+  const place = (obj: THREE.Object3D, th: number, rad = r) => {
+    const holder = new THREE.Group();
+    holder.add(obj);
+    holder.position.set(cx + Math.cos(th) * rad, 0, cz + Math.sin(th) * rad);
+    holder.rotation.y = -th - Math.PI / 2;
+    g.add(holder);
+    return holder;
+  };
+  const gateHalf = 2.8 / r;
+  for (let i = 0; i < n; i++) {
+    const th = a0 + ((i + 0.5) / n) * (a1 - a0);
+    if (roadAngles.some((ra) => Math.abs(angleDiff(th, ra)) < gateHalf)) continue;
+    const p = A.prop(piece, ((a1 - a0) * r) / n + 0.1, 'max');
+    orientAlongX(p);
+    place(p, th);
+  }
+  for (const ra of roadAngles) {
+    const gate = A.prop(gateModel, 4.6, 'max');
+    orientAlongX(gate);
+    place(gate, ra);
+  }
+  // Lookout post just inside the wall.
+  const post = tier === 'wood' ? A.prop('structure-floor', 2.2, 'max') : A.prop('building_tower_base_blue', 3.6, 'y');
+  const H = new THREE.Box3().setFromObject(post).max.y - (tier === 'wood' ? 0 : 0.3);
+  const postHolder = place(post, postAngle, r - 1.6);
+  if (tier === 'citadel') {
+    // Corner towers at both ends of the section.
+    for (const th of [a0, a1]) place(A.prop('building_tower_A_blue', 5.2, 'y'), th);
+  }
+  return { group: g, postHolder, postHeight: H };
+}
+
+function angleDiff(a: number, b: number) {
+  let d = a - b;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
 }
 
 /** Treasure chest: returns the lid so it can swing open. */

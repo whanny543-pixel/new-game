@@ -19,6 +19,8 @@ const LABEL: Record<PlotKind, string> = {
   camp: 'Lumber Camp',
   quarry: 'Quarry',
   farm: 'Farm',
+  goldmine: 'Gold Mine',
+  wall: 'Wall',
   castle: 'Castle',
 };
 
@@ -124,7 +126,7 @@ export class Plot {
 
   private redraw(active: boolean) {
     const needs = this.woodCost > 0 || this.stoneCost > 0 || this.foodCost > 0;
-    const key = `${this.level}|${this.paid}|${active}|${needs ? `${this.stock.wood >= this.woodCost}${this.stock.stone >= this.stoneCost}${this.stock.food >= this.foodCost}` : ''}`;
+    const key = `${this.cost}|${this.level}|${this.paid}|${active}|${needs ? `${this.stock.wood >= this.woodCost}${this.stock.stone >= this.stoneCost}${this.stock.food >= this.foodCost}` : ''}`;
     if (key === this.drawnKey) return;
     this.drawnKey = key;
     const g = this.ctx;
@@ -402,6 +404,36 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       g.lineTo(32, 6);
       g.lineTo(40, 38);
       g.closePath();
+      break;
+    case 'goldmine':
+      // Stack of gold bars
+      for (const [x, y] of [
+        [-26, 20],
+        [0, 20],
+        [26, 20],
+        [-13, -4],
+        [13, -4],
+        [0, -28],
+      ]) {
+        g.moveTo(x - 14, y + 10);
+        g.lineTo(x - 10, y - 8);
+        g.lineTo(x + 10, y - 8);
+        g.lineTo(x + 14, y + 10);
+        g.closePath();
+      }
+      break;
+    case 'wall':
+      // Palisade with a walkway
+      for (let i = 0; i < 5; i++) {
+        const x = -40 + i * 17;
+        g.moveTo(x, 36);
+        g.lineTo(x, -18);
+        g.lineTo(x + 7, -34);
+        g.lineTo(x + 14, -18);
+        g.lineTo(x + 14, 36);
+        g.closePath();
+      }
+      g.rect(-44, 4, 88, 8);
       break;
     case 'farm':
       // Wheat sheaf

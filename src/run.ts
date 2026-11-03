@@ -19,11 +19,12 @@ import {
   WORKSHOP,
   coinValue,
   CASTLE_LEVELS,
-  WALL_TIERS,
-  TOWN_WALL,
   type KingdomMap,
   type GearId,
   NOVA,
+  KINGDOM_WALL,
+  GOLD_MINE,
+  wallTierFor,
   type EnemyKind,
   type EnemyType,
   type Place,
@@ -79,6 +80,11 @@ interface Enemy {
   /** Seconds since death (death animation), -1 while alive. */
   deadT: number;
   animT: number;
+  /** Off the road: storming the kingdom across open ground. */
+  free: boolean;
+  /** Where a free goblin is heading (near the castle). */
+  tx: number;
+  tz: number;
 }
 
 interface Unit {
@@ -184,7 +190,31 @@ interface GroundCoin {
 interface SpawnItem {
   at: number;
   kind: EnemyKind;
+  /** Road index, or -1 for a warband coming across the fields. */
   road: number;
+  angle?: number;
+}
+
+/** One section of the kingdom wall. */
+interface WallSection {
+  id: string;
+  a0: number;
+  a1: number;
+  mid: number;
+  plot: Plot;
+  built: boolean;
+  alive: boolean;
+  hp: number;
+  maxHp: number;
+  lastHit: number;
+  rebuildable: boolean;
+  pos: THREE.Vector3;
+  group: THREE.Object3D | null;
+  roadAngles: number[];
+  postAngle: number;
+  tier: string;
+  rise: number;
+  shake: number;
 }
 
 interface Chest {
@@ -206,7 +236,7 @@ export interface RunEvents {
   flash(amount: number): void;
 }
 
-export const MAX_ENEMIES: Record<EnemyKind, number> = { goblin: 420, runner: 220, troll: 24 };
+export const MAX_ENEMIES: Record<EnemyKind, number> = { goblin: 600, runner: 260, troll: 24 };
 
 export class Run {
   readonly root = new THREE.Group();
@@ -255,8 +285,9 @@ export class Run {
   /** Holds the current castle model (swapped on each upgrade). */
   hall = { root: new THREE.Group(), model: null as THREE.Object3D | null };
   castleLevel = 0;
-  private townWall: THREE.Object3D | null = null;
-  private wallRise = 1;
+  sections: WallSection[] = [];
+  private wallFallenAt = -99;
+  private barT = 0;
   hallHp: number = CASTLE_LEVELS[0].hp;
   hallMax: number = CASTLE_LEVELS[0].hp;
   private hallRadius = CASTLE_LEVELS[0].radius;
@@ -380,6 +411,8 @@ export class Run {
       this.plots.push(p);
     }
 
+    this.createSections();
+
     // A little gold on the ground teaches the collect → build loop straight away.
     for (let i = 0; i < PLAYER.startGold + this.startBonus; i++) this.dropCoin(v1.set(-3.25 + (i % 7) * 1.08, 0.3, 7.2 + Math.floor(i / 7) * 0.9), 0.4, 1);
   }
@@ -416,7 +449,7 @@ export class Run {
     // Keep scenery off the town wall ring and away from the houses that appear later.
     for (let i = 0; i < 48; i++) {
       const th = (i / 48) * Math.PI * 2;
-      out.push({ x: TOWN_WALL.cx + Math.cos(th) * TOWN_WALL.r, z: TOWN_WALL.cz + Math.sin(th) * TOWN_WALL.r, r: 2 });
+      out.push({ x: KINGDOM_WALL.cx + Math.cos(th) * KINGDOM_WALL.r, z: KINGDOM_WALL.cz + Math.sin(th) * KINGDOM_WALL.r, r: 2.4 });
     }
     for (const [, x, z] of HOUSES) out.push({ x, z, r: 3.2 });
     for (const p of this.plots) {
@@ -511,7 +544,9 @@ export class Run {
     this.updateChests(dt);
     this.updatePlots(dt);
     this.updateHall(dt);
-    this.kingdom.update(dt, [...this.barricades.values()], this.time);
+    this.kingdom.update(dt, [...this.barricades.values(), ...this.sections.filter((w) => w.built)], this.time);
+    this.updateSections(dt);
+    this.collectGoldBars(dt);
     this.hud.setResources(this.kingdom.wood, this.kingdom.stone, this.kingdom.food);
     this.updateGuide();
     this.updateStacks(dt);
@@ -723,7 +758,7 @@ export class Run {
     // Spawn whatever is due.
     while (this.queue.length && this.queue[0].at <= this.time) {
       const it = this.queue.shift()!;
-      this.spawn(it.kind, it.road);
+      this.spawn(it.kind, it.road, it.angle);
       this.waveSpawned++;
     }
     // Beat the last wave of this kingdom to win it.
@@ -768,10 +803,13 @@ export class Run {
     for (let p = 0; p < packs && left > 0; p++) {
       const size = p === packs - 1 ? left : Math.min(left, Math.round(total / packs));
       left -= size;
-      const road = this.roadBOpen && p % 3 === 1 ? 1 : 0;
+      // From wave 2 some warbands skip the roads and come straight across the fields.
+      const field = n >= 3 && Math.random() < Math.min(0.5, 0.08 + n * 0.04);
+      const road = field ? -1 : this.roadBOpen && p % 3 === 1 ? 1 : 0;
+      const angle = Math.random() * Math.PI * 2;
       for (let i = 0; i < size; i++) {
         const kind: EnemyKind = n >= 3 && Math.random() < 0.25 ? 'runner' : 'goblin';
-        items.push({ at: t + i * 0.12, kind, road });
+        items.push({ at: t + i * 0.1, kind, road, angle: angle + (Math.random() - 0.5) * 0.35 });
       }
       t += gap;
     }
@@ -791,14 +829,17 @@ export class Run {
     }
   }
 
-  private spawn(kind: EnemyKind, road: number) {
+  private spawn(kind: EnemyKind, road: number, angle = 0) {
     if (this.enemies.filter((e) => e.kind === kind).length >= MAX_ENEMIES[kind]) return;
     const type = ENEMIES[kind];
     const hp = Math.round(type.hp * this.map.hpMul * (1 + WAVES.hpGrowth * (this.wave - 1)) * (type.boss ? 1 + this.wave * 0.06 : 1));
     const e: Enemy = {
       kind,
       type,
-      road,
+      road: Math.max(0, road),
+      free: road < 0,
+      tx: (Math.random() - 0.5) * 3,
+      tz: (Math.random() - 0.5) * 3,
       s: Math.random() * 0.8,
       off: (Math.random() * 2 - 1) * (ROAD_HALF_WIDTH - 0.5),
       x: 0,
@@ -817,9 +858,17 @@ export class Run {
       deadT: -1,
       animT: Math.random(),
     };
-    this.roads[road].point(e.s, e.off, v1);
-    e.x = v1.x;
-    e.z = v1.z;
+    if (road < 0) {
+      // Field warbands appear at the edge of the map.
+      const R = 46 + Math.random() * 4;
+      e.x = KINGDOM_WALL.cx + Math.cos(angle) * R;
+      e.z = KINGDOM_WALL.cz + Math.sin(angle) * R;
+      e.spawnT = 0;
+    } else {
+      this.roads[road].point(e.s, e.off, v1);
+      e.x = v1.x;
+      e.z = v1.z;
+    }
     this.enemies.push(e);
     if (type.boss) this.fx.shake = Math.max(this.fx.shake, 0.4);
   }
@@ -862,6 +911,12 @@ export class Run {
       e.atkCd -= dt;
       e.lunge = Math.max(0, e.lunge - dt * 4);
       e.flash = Math.max(0, e.flash - dt * 7);
+      // Near the kingdom, road goblins leave the road and storm the walls across open ground.
+      if (!e.free && Math.hypot(e.x - KINGDOM_WALL.cx, e.z - KINGDOM_WALL.cz) < KINGDOM_WALL.r + KINGDOM_WALL.assault) e.free = true;
+      if (e.free) {
+        this.updateFreeEnemy(e, dt, knights);
+        continue;
+      }
       if (e.spawnT > 0) {
         // Clawing up out of the ground.
         e.spawnT -= dt;
@@ -916,7 +971,7 @@ export class Run {
       }
       // 4. Reaching the hall: one heavy hit, then the goblin is gone (no reward).
       if (!blocked && e.s >= road.length - 0.3) {
-        this.damageHall(t.damage * 4);
+        this.damageHall(t.damage * 2.5);
         e.alive = false;
         this.fx.p.explosion(v1.set(e.x, 1, e.z));
         continue;
@@ -985,6 +1040,109 @@ export class Run {
     }
   }
 
+  /** Section of the kingdom wall at a given angle, if any. */
+  private sectionAt(angle: number) {
+    const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    return this.sections[Math.min(this.sections.length - 1, Math.floor((a / (Math.PI * 2)) * this.sections.length))];
+  }
+
+  /** Open-ground movement: straight at the castle, stopped by walls, knights and the king. */
+  private updateFreeEnemy(e: Enemy, dt: number, knights: Unit[]) {
+    const t = e.type;
+    let blocked = false;
+    let attack: (() => void) | null = null;
+    let faceX = 0;
+    let faceZ = 0;
+    const hd = Math.hypot(this.heroPos.x - e.x, this.heroPos.z - e.z);
+    if (this.heroAlive && hd < t.radius + 0.7) {
+      blocked = true;
+      faceX = this.heroPos.x - e.x;
+      faceZ = this.heroPos.z - e.z;
+      attack = () => this.damageHero(t.damage);
+    }
+    if (!blocked) {
+      for (const k of knights) {
+        if (Math.hypot(k.pos.x - e.x, k.pos.z - e.z) < t.radius + 0.75) {
+          blocked = true;
+          faceX = k.pos.x - e.x;
+          faceZ = k.pos.z - e.z;
+          attack = () => this.damageKnight(k, t.damage);
+          break;
+        }
+      }
+    }
+    // The wall: blocked while outside it and its section stands.
+    const W = KINGDOM_WALL;
+    const dx0 = e.x - W.cx;
+    const dz0 = e.z - W.cz;
+    const dw = Math.hypot(dx0, dz0);
+    const outside = dw > W.r - 0.9;
+    const sec = this.sectionAt(Math.atan2(dz0, dx0));
+    if (!blocked && outside && sec?.alive && dw - t.radius < W.r + 0.55) {
+      blocked = true;
+      faceX = -dx0;
+      faceZ = -dz0;
+      attack = () => this.damageSection(sec, t.damage);
+    }
+    // Reaching the castle: one heavy hit, then gone.
+    const dc = Math.hypot(e.x - e.tx, e.z - e.tz);
+    if (!blocked && Math.hypot(e.x, e.z) < this.hallRadius + t.radius + 0.4) {
+      this.damageHall(t.damage * 2.5);
+      e.alive = false;
+      this.fx.p.explosion(v1.set(e.x, 1, e.z));
+      return;
+    }
+    if (blocked) {
+      if (attack && e.atkCd <= 0) {
+        e.atkCd = t.boss ? 1.4 : 1.0;
+        e.lunge = 1;
+        attack();
+      }
+    } else {
+      const step = t.speed * dt;
+      e.x += ((e.tx - e.x) / Math.max(dc, 0.01)) * step;
+      e.z += ((e.tz - e.z) / Math.max(dc, 0.01)) * step;
+    }
+    e.moving = !blocked;
+    // Separation.
+    let px = 0;
+    let pz = 0;
+    const gx = Math.floor(e.x / 1.6) + 512;
+    const gz = Math.floor(e.z / 1.6) + 512;
+    for (let ix = -1; ix <= 1; ix++)
+      for (let iz = -1; iz <= 1; iz++) {
+        const cell = this.grid.get((gx + ix) * 4096 + gz + iz);
+        if (!cell) continue;
+        for (const o of cell) {
+          if (o === e || !o.alive) continue;
+          const sx = e.x - o.x;
+          const sz = e.z - o.z;
+          const min = t.radius + o.type.radius;
+          const d2 = sx * sx + sz * sz;
+          if (d2 < min * min && d2 > 1e-6) {
+            const d = Math.sqrt(d2);
+            const k = ((min - d) / d) * (o.type.boss && !t.boss ? 0.9 : 0.45);
+            px += sx * k;
+            pz += sz * k;
+          }
+        }
+      }
+    e.x += px;
+    e.z += pz;
+    // Never get shoved through a standing wall.
+    if (outside && sec?.alive) {
+      const nd = Math.hypot(e.x - W.cx, e.z - W.cz);
+      const min = W.r + t.radius * 0.6;
+      if (nd < min) {
+        e.x = W.cx + ((e.x - W.cx) / nd) * min;
+        e.z = W.cz + ((e.z - W.cz) / nd) * min;
+      }
+    }
+    if (faceX || faceZ) e.facing = Math.atan2(faceX, faceZ);
+    else e.facing = lerpAngle(e.facing, Math.atan2(e.tx - e.x, e.tz - e.z), Math.min(1, dt * 8));
+    if (e.bar) this.hud.placeBar(e.bar, v1.set(e.x, 4.2, e.z), e.hp / e.maxHp);
+  }
+
   private drawCrowd(dt: number) {
     const h = this.horde;
     h.begin();
@@ -1023,7 +1181,13 @@ export class Run {
     e.hp -= dmg;
     e.flash = 1;
     // Small knockback up the road (bosses shrug it off).
-    if (!e.type.boss) e.s = Math.max(0, e.s - 0.12);
+    if (!e.type.boss) {
+      if (e.free) {
+        const d = Math.hypot(e.x - e.tx, e.z - e.tz) || 1;
+        e.x -= ((e.tx - e.x) / d) * 0.12;
+        e.z -= ((e.tz - e.z) / d) * 0.12;
+      } else e.s = Math.max(0, e.s - 0.12);
+    }
     v1.set(e.x, e.type.boss ? 2.2 : 1.0, e.z);
     if (crit) this.fx.p.crit(v1);
     else this.fx.p.hit(v1, e.kind === 'troll' ? 0xc9d4de : 0xb7ff7a);
@@ -1310,6 +1474,7 @@ export class Run {
     if (p.maxed || !this.requirementsMet(p.def)) return false;
     if (!this.needMet(p.def.levelNeeds?.[p.level] ?? '')) return false;
     if (p.def.kind === 'barricade') return !this.barricades.get(p.def.id)?.alive;
+    if (p.def.kind === 'wall') return !this.sections.find((w) => w.plot === p)?.built;
     if (p.def.kind === 'recruitArcher') return this.openSpots('archer') > 0;
     if (p.def.kind === 'recruitKnight') return this.openSpots('knight') > 0;
     return true;
@@ -1409,6 +1574,19 @@ export class Run {
       case 'castle':
         this.upgradeCastle(lvl + 1);
         break;
+      case 'wall': {
+        const sec = this.sections.find((w) => w.plot === p)!;
+        this.buildSection(sec);
+        p.level = 0;
+        break;
+      }
+      case 'goldmine':
+        this.kingdom.buildGoldMine(this.resolve(def.place), lvl);
+        if (lvl === 0) {
+          p.setPos(11.4, -3.2);
+          this.fx.text(v2.copy(p.pos).setY(4), 'Gold Mine! Miners dig up gold bars', 'good');
+        } else this.fx.text(v2.copy(p.pos).setY(4), '+1 miner', 'good');
+        break;
       case 'farm':
         this.kingdom.buildFarm(this.resolve(def.place), lvl);
         if (lvl === 0) {
@@ -1431,7 +1609,7 @@ export class Run {
     const def = p.def;
     let t = this.towers.get(def.id);
     if (!t) {
-      const rig = S.makeTower();
+      const rig = S.makeTower(S.eraFor(this.castleLevel));
       const pos = this.resolve(def.place);
       rig.root.position.copy(pos);
       // Face the road.
@@ -1451,7 +1629,7 @@ export class Run {
       t.level = Math.min(TOWER_LEVELS.length - 1, lvl);
       t.rig.roof.visible = t.level >= 1;
       t.rig.ballista.visible = TOWER_LEVELS[t.level].ballista;
-      t.rig.base.visible = !TOWER_LEVELS[t.level].ballista;
+      t.rig.base.visible = !TOWER_LEVELS[t.level].ballista || !!t.rig.keepBaseWithBallista;
       if (TOWER_LEVELS[t.level].ballista) t.rig.roof.visible = false;
       t.grow = 0.4;
       this.fx.text(v2.copy(t.pos).setY(4), TOWER_LEVELS[t.level].ballista ? 'Ballista mounted!' : '+1 archer slot', 'good');
@@ -1505,7 +1683,7 @@ export class Run {
   private buildShop(p: Plot, kind: Workshop['kind'], lvl: number) {
     let shop = this.shops.get(p.def.id);
     if (!shop) {
-      const rig = S.makeShop(kind);
+      const rig = S.makeShop(kind, S.eraFor(this.castleLevel));
       const pos = p.pos.clone();
       rig.root.position.copy(pos);
       this.root.add(rig.root);
@@ -1946,10 +2124,6 @@ export class Run {
       const k = this.castleRise < 1 ? 1 + Math.sin(this.castleRise * Math.PI) * 0.12 : 1;
       this.hall.root.scale.set(1, Math.max(0.01, this.castleRise) * k, 1);
     }
-    if (this.townWall && this.wallRise < 1) {
-      this.wallRise = Math.min(1, this.wallRise + dt * 1.6);
-      this.townWall.scale.y = Math.max(0.01, this.wallRise);
-    }
     this.hud.setKeep(this.hallHp / this.hallMax);
   }
 
@@ -2039,12 +2213,12 @@ export class Run {
 
   /**
    * Castle upgrades grow the whole kingdom: a bigger castle, more health, more builders and townsfolk,
-   * new houses, and town walls that go from nothing → stakes → wood → stone → castle walls.
+   * new houses, and every built wall section rebuilt in the new material.
    */
   private upgradeCastle(level: number) {
     level = Math.min(level, CASTLE_LEVELS.length - 1);
     const L = CASTLE_LEVELS[level];
-    const prev = CASTLE_LEVELS[this.castleLevel];
+    this.prevCastle = this.castleLevel;
     this.castleLevel = level;
     this.kingdom.setCastleLevel(level);
     const frac = this.hallHp / this.hallMax;
@@ -2054,7 +2228,9 @@ export class Run {
     this.setCastleModel(level);
     this.hall.root.scale.set(1, 0.01, 1);
     this.castleRise = 0;
-    if (L.walls !== prev.walls) this.buildTownWall(L.walls);
+    if (wallTierFor(level) !== wallTierFor(this.prevCastle)) this.retierSections();
+    if (S.eraFor(level) !== S.eraFor(this.prevCastle)) this.applyEra(S.eraFor(level));
+    this.prevCastle = level;
     this.hud.banner(`${L.name}!`, false);
     this.fx.pillar(v1.set(0, 0, 0), 0xffe08a, 5, 1.4);
     this.fx.ring(v1, 0xffd34d, 14, 0.9);
@@ -2066,86 +2242,214 @@ export class Run {
   }
 
   private castleRise = 1;
+  private prevCastle = 0;
 
-  /** Raises the town wall ring for a tier, with gates where it crosses the roads. */
-  private buildTownWall(tierIndex: number) {
-    const tier = WALL_TIERS[tierIndex];
-    const { cx, cz, r } = TOWN_WALL;
-    const blockers: { x: number; z: number; r: number }[] = [];
-    for (const q of this.plots) if (q.shown || q.level > 0) blockers.push({ x: q.pos.x, z: q.pos.z, r: 1.6 });
-    for (const t of this.towers.values()) if (!t.plot || t.plot.def.kind === 'tower') blockers.push({ x: t.pos.x, z: t.pos.z, r: 2 });
-    for (const sh of this.shops.values()) blockers.push({ x: sh.pos.x, z: sh.pos.z, r: 3 });
-    for (const site of [this.kingdom.camp, this.kingdom.quarry, this.kingdom.farm]) if (site) blockers.push({ x: site.pos.x, z: site.pos.z, r: 3.5 });
-    const canPlace = (x: number, z: number) => {
-      if (blockers.some((b) => Math.hypot(x - b.x, z - b.z) < b.r + 1)) return false;
-      return this.roads.every((rd) => rd.distanceTo(x, z) > ROAD_HALF_WIDTH + 1.4);
-    };
-    if (this.townWall) this.root.remove(this.townWall);
-    this.townWall = S.makeTownWall(tier, tierIndex >= 5, cx, cz, r, canPlace);
-    this.root.add(this.townWall);
-    this.wallRise = 0;
-    if (tier.wall) this.hud.banner(`${tier.name} raised!`, false);
-    // Dust all the way round as the new wall goes up.
-    for (let i = 0; i < 24; i++) {
-      const th = (i / 24) * Math.PI * 2;
-      this.fx.p.dust(v1.set(cx + Math.cos(th) * r, 0.2, cz + Math.sin(th) * r), 3);
+  // ------------------------------------------------------------------ kingdom wall
+
+  /** Lays out the wall sections and their build pads around the kingdom. */
+  private createSections() {
+    const W = KINGDOM_WALL;
+    const N = W.sections;
+    // Where each road crosses the wall circle.
+    const crossings = this.roads.map((road) => {
+      let s = road.length;
+      while (s > 0 && road.point(s, 0, v1).distanceTo(v2.set(W.cx, 0, W.cz)) < W.r) s -= 0.2;
+      const p = road.point(s, 0, new THREE.Vector3());
+      return Math.atan2(p.z - W.cz, p.x - W.cx);
+    });
+    const norm = (a: number) => ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    for (let i = 0; i < N; i++) {
+      const a0 = (i / N) * Math.PI * 2;
+      const a1 = ((i + 1) / N) * Math.PI * 2;
+      const mid = (a0 + a1) / 2;
+      const roadAngles = crossings.filter((c) => norm(c) >= a0 && norm(c) < a1).map((c) => norm(c));
+      const span = a1 - a0;
+      const postAngle = roadAngles.some((ra) => Math.abs(ra - mid) < span * 0.3) ? (roadAngles[0] < mid ? mid + span * 0.3 : mid - span * 0.3) : mid;
+      // Pad just inside the wall, nudged clear of other plots and the roads.
+      let best = new THREE.Vector3();
+      let found = false;
+      for (const rr of [W.r - 2.6, W.r - 3.4, W.r - 4.2]) {
+        for (const da of [0, 0.12, -0.12, 0.22, -0.22]) {
+          const a = postAngle + da;
+          const x = W.cx + Math.cos(a) * rr;
+          const z = W.cz + Math.sin(a) * rr;
+          if (this.plots.some((q) => q.def.kind !== 'wall' && Math.hypot(q.pos.x - x, q.pos.z - z) < 2.8)) continue;
+          if (this.roads.some((r) => r.distanceTo(x, z) < ROAD_HALF_WIDTH + 1.4)) continue;
+          if (Math.hypot(x, z) < this.hallRadius + 3) continue;
+          best = new THREE.Vector3(x, 0, z);
+          found = true;
+          break;
+        }
+        if (found) break;
+      }
+      if (!found) best.set(W.cx + Math.cos(mid) * (W.r - 2.6), 0, W.cz + Math.sin(mid) * (W.r - 2.6));
+      const def: PlotDef = { id: `wall${i}`, kind: 'wall', place: { x: best.x, z: best.z }, costs: [W.baseCost], requires: ['tw1'] };
+      const plot = new Plot(def);
+      plot.setPos(best.x, best.z);
+      this.root.add(plot.group);
+      this.plots.push(plot);
+      this.sections.push({
+        id: def.id,
+        a0,
+        a1,
+        mid,
+        plot,
+        built: false,
+        alive: false,
+        hp: 0,
+        maxHp: 1,
+        lastHit: -99,
+        rebuildable: true,
+        pos: new THREE.Vector3(W.cx + Math.cos(mid) * W.r, 0, W.cz + Math.sin(mid) * W.r),
+        group: null,
+        roadAngles,
+        postAngle,
+        tier: 'wood',
+        rise: 1,
+        shake: 0,
+      });
     }
-    if (tier.gate) this.roads.forEach((_, i) => this.buildGate(i, tierIndex));
   }
 
-  /** A gate where the town wall crosses a road; it upgrades with the wall. */
-  private buildGate(roadIndex: number, tierIndex: number) {
-    const tier = WALL_TIERS[tierIndex];
-    const road = this.roads[roadIndex];
-    const { cx, cz, r } = TOWN_WALL;
-    // Walk back from the castle end until the road leaves the wall ring.
-    let s = road.length;
-    while (s > 0 && road.point(s, 0, v1).distanceTo(v2.set(cx, 0, cz)) < r) s -= 0.25;
-    const pos = road.point(s, 0, new THREE.Vector3());
-    road.tangent(s, v2);
-    const right = new THREE.Vector3(-v2.z, 0, v2.x);
-    const span = ROAD_HALF_WIDTH * 2 + 0.8;
-    const castle = tier.archers > 0;
-    const group = S.makeGate(tier.gate, tier.wall, span, () => false, castle);
-    group.position.copy(pos);
-    group.rotation.y = Math.atan2(v2.x, v2.z);
-    this.root.add(group);
-    const id = `gate${roadIndex}`;
-    let b = this.barricades.get(id);
-    if (!b) {
-      const rubble = S.prop('building_destroyed', span * 0.8, 'max');
-      rubble.position.copy(pos);
-      rubble.visible = false;
-      this.root.add(rubble);
-      b = { id, plot: null, road: roadIndex, s, hp: tier.gateHp, maxHp: tier.gateHp, alive: true, mesh: group, pos, lastHit: -99, shake: 0, rise: 0, rebuildable: true, gate: { tier: tierIndex, rubble, right } };
-      this.barricades.set(id, b);
-    } else {
-      this.root.remove(b.mesh);
-      b.mesh = group;
-      b.gate!.tier = tierIndex;
-      b.maxHp = tier.gateHp;
-      b.hp = tier.gateHp;
-      b.alive = true;
-      b.gate!.rubble.visible = false;
+  /** Builds (or rebuilds in a new material) one wall section with its archer lookout. */
+  private buildSection(sec: WallSection, retier = false) {
+    const W = KINGDOM_WALL;
+    const tier = wallTierFor(this.castleLevel);
+    if (sec.group) this.root.remove(sec.group);
+    const m = S.makeWallSection(tier, W.cx, W.cz, W.r, sec.a0, sec.a1, sec.roadAngles, sec.postAngle);
+    this.root.add(m.group);
+    sec.group = m.group;
+    const frac = sec.built && sec.alive ? sec.hp / sec.maxHp : 1;
+    sec.tier = tier;
+    sec.maxHp = W.hp[tier];
+    sec.hp = frac * sec.maxHp;
+    sec.built = true;
+    sec.alive = true;
+    sec.rise = 0;
+    m.group.scale.y = 0.01;
+    // Lookout post for two archers.
+    const H = m.postHeight;
+    const rig: S.TowerRig = {
+      root: m.postHolder,
+      roof: new THREE.Group(),
+      ballista: new THREE.Group(),
+      base: new THREE.Group(),
+      slots: [new THREE.Vector3(-0.55, H, 0), new THREE.Vector3(0.55, H, 0)],
+    };
+    const key = `${sec.id}_post`;
+    const existing = this.towers.get(key);
+    if (existing) existing.rig = rig;
+    else {
+      const pos = new THREE.Vector3(W.cx + Math.cos(sec.postAngle) * (W.r - 1.6), 0, W.cz + Math.sin(sec.postAngle) * (W.r - 1.6));
+      this.towers.set(key, { plot: null, pos, rig, level: 1, units: [null, null], ballistaCd: 0, grow: 1, label: this.hud.worldLabel('archer') });
     }
-    b.rise = 0;
-    this.fx.p.build(v1.copy(pos).setY(0.5));
-    // Castle-tier gates have a walkway with archer posts.
-    if (castle && !this.towers.has(id + '_wall')) {
-      const H = 3.1;
-      const rig: S.TowerRig = {
-        root: group,
-        roof: new THREE.Group(),
-        ballista: new THREE.Group(),
-        base: new THREE.Group(),
-        slots: [new THREE.Vector3(-1.6, H, -0.3), new THREE.Vector3(1.6, H, -0.3)],
-      };
-      const t: Tower = { plot: null, pos: pos.clone(), rig, level: 1, units: [null, null], ballistaCd: 0, grow: 1, label: this.hud.worldLabel('archer') };
-      this.towers.set(id + '_wall', t);
-    } else if (castle) {
-      // Re-seat the existing wall archers on the new gate model.
-      const t = this.towers.get(id + '_wall')!;
-      t.rig.root = group;
+    if (!retier) {
+      for (let i = 0; i < 6; i++) {
+        const th = sec.a0 + ((i + 0.5) / 6) * (sec.a1 - sec.a0);
+        this.fx.p.dust(v1.set(W.cx + Math.cos(th) * W.r, 0.2, W.cz + Math.sin(th) * W.r), 3);
+      }
+      this.fx.text(v1.copy(sec.pos).setY(3), 'Wall raised!', 'good');
+      // Each new section costs a little more.
+      const built = this.sections.filter((w) => w.built).length;
+      for (const w of this.sections) if (!w.built) w.plot.def.costs[0] = W.baseCost + W.costStep * built;
+    }
+  }
+
+  /** Castle upgrades rebuild every standing wall section in the new material. */
+  private retierSections() {
+    const tier = wallTierFor(this.castleLevel);
+    let any = false;
+    for (const sec of this.sections) {
+      if (!sec.built) continue;
+      this.buildSection(sec, true);
+      any = true;
+    }
+    if (any) this.hud.banner(tier === 'stone' ? 'Stone walls!' : tier === 'castle' ? 'Castle walls!' : tier === 'citadel' ? 'Citadel walls!' : 'Walls rebuilt!', false);
+  }
+
+  /** Swaps every workshop and watchtower to the new building style. */
+  private applyEra(era: S.Era) {
+    for (const shop of this.shops.values()) {
+      const rig = S.makeShop(shop.kind, era);
+      rig.root.position.copy(shop.pos);
+      this.root.remove(shop.rig.root);
+      this.root.add(rig.root);
+      shop.rig = rig;
+      shop.rackWorld = rig.rack.clone().add(shop.pos);
+      this.fx.p.build(v1.copy(shop.pos).setY(0.5));
+    }
+    for (const [id, t] of this.towers) {
+      if (id.endsWith('_post') || id.endsWith('_wall') || !t.plot) continue;
+      const rig = S.makeTower(era);
+      rig.root.position.copy(t.rig.root.position);
+      rig.root.rotation.copy(t.rig.root.rotation);
+      this.root.remove(t.rig.root);
+      this.root.add(rig.root);
+      rig.roof.visible = t.level >= 1 && !TOWER_LEVELS[t.level].ballista;
+      rig.ballista.visible = TOWER_LEVELS[t.level].ballista;
+      rig.base.visible = !TOWER_LEVELS[t.level].ballista || !!rig.keepBaseWithBallista;
+      t.rig = rig;
+      t.grow = 0;
+    }
+    this.kingdom.setEra(era);
+    this.hud.banner(era === 'stone' ? 'The kingdom builds in stone!' : '', false);
+  }
+
+  private damageSection(sec: WallSection, dmg: number) {
+    sec.hp -= dmg;
+    sec.lastHit = this.time;
+    sec.shake = 1;
+    if (Math.random() < 0.3) this.fx.p.emit({ pos: v1.set(sec.pos.x, 1, sec.pos.z), count: 2, color: sec.tier === 'wood' ? [0x9b6638, 0xc08850] : [0xb9b6ae, 0x8d8a83], speed: 3, up: 2, size: 0.18, life: 0.5, gravity: 12, glow: false });
+    if (sec.hp <= 0 && sec.alive) {
+      sec.alive = false;
+      sec.hp = 0;
+      if (sec.group) sec.group.visible = false;
+      this.fx.burst(v1.set(sec.pos.x, 0.8, sec.pos.z), sec.tier === 'wood' ? COLORS.wood : COLORS.stone, 26, 6);
+      this.fx.p.explosion(v1);
+      this.fx.shake = Math.max(this.fx.shake, 0.6);
+      this.sfx.boom();
+      this.events.haptic(true);
+      if (this.time - this.wallFallenAt > 4) this.hud.banner('A wall has fallen!', true);
+      this.wallFallenAt = this.time;
+    }
+  }
+
+  private updateSections(dt: number) {
+    for (const sec of this.sections) {
+      if (!sec.built || !sec.group) continue;
+      if (!sec.alive && sec.hp >= sec.maxHp * 0.5) {
+        // Builders patched it back up.
+        sec.alive = true;
+        sec.group.visible = true;
+        sec.rise = 0;
+        this.fx.text(v1.copy(sec.pos).setY(3), 'Wall rebuilt!', 'good');
+      }
+      if (sec.rise < 1) {
+        sec.rise = Math.min(1, sec.rise + dt * 2.5);
+        const k = sec.rise < 1 ? 1 + Math.sin(sec.rise * Math.PI) * 0.12 : 1;
+        sec.group.scale.y = Math.max(0.01, sec.rise) * k;
+      }
+      sec.shake = Math.max(0, sec.shake - dt * 5);
+      sec.group.position.x = (Math.random() - 0.5) * sec.shake * 0.1;
+      const t = this.towers.get(`${sec.id}_post`);
+      if (t) {
+        t.rig.root.visible = sec.alive;
+        this.hud.placeLabel(t.label, v1.copy(t.pos).setY(sec.tier === 'wood' ? 4.2 : 5), `${t.units.filter(Boolean).length}/2`, false);
+      }
+    }
+  }
+
+  /** Walking past the gold mine scoops its gold bars into the king's stack. */
+  private collectGoldBars(dt: number) {
+    const m = this.kingdom.goldmine;
+    if (!m || !this.heroAlive || this.kingdom.goldBars <= 0) return;
+    if (this.heroPos.distanceTo(m.drop) > 2.8) return;
+    this.barT -= dt;
+    if (this.barT > 0) return;
+    this.barT = 0.07;
+    if (this.kingdom.takeBars(1)) {
+      const value = GOLD_MINE.barValue * coinValue(this.wave);
+      this.fx.fly(m.drop.clone().setY(0.6), () => this.stackTop(v3), 0.3, 1.4, () => this.gainCoin(value), 1.3);
     }
   }
 
@@ -2158,7 +2462,13 @@ export class Run {
     for (const e of this.enemies) {
       if (!e.alive) continue;
       if ((e.x - this.heroPos.x) ** 2 + (e.z - this.heroPos.z) ** 2 > r2) continue;
-      if (!e.type.boss) e.s = Math.max(0, e.s - NOVA.knockback);
+      if (!e.type.boss) {
+        if (e.free) {
+          const d = Math.hypot(e.x - this.heroPos.x, e.z - this.heroPos.z) || 1;
+          e.x += ((e.x - this.heroPos.x) / d) * NOVA.knockback;
+          e.z += ((e.z - this.heroPos.z) / d) * NOVA.knockback;
+        } else e.s = Math.max(0, e.s - NOVA.knockback);
+      }
       e.spawnT = 0;
       this.hitEnemy(e, Math.round(NOVA.damage * this.stats.damage), true);
     }
@@ -2193,7 +2503,9 @@ export class Run {
     if (built('gp1') && !built('barracks')) return 'Build Barracks to recruit knights';
     if (built('barracks') && !this.units.some((u) => u.type === 'knight')) return 'Recruit knights to hold the road';
     if (built('tw2') && !built('camp')) return 'Build a Lumber Camp: woodcutters will gather wood';
-    if (built('camp') && this.castleLevel === 0) return 'Upgrade your camp: the castle, walls and town grow with it';
+    if (this.castleLevel === 0 && this.carry >= 15) return 'Upgrade your camp into a Wooden Hall';
+    if (built('tw1') && !this.sections.some((w) => w.built)) return 'Build walls around your kingdom: goblins will storm it';
+    if (this.kingdom.goldBars >= 6) return 'Gold bars are piling up at the mine!';
     if (built('range') && !built('farm') && this.kingdom.food < 4) return 'Build a Farm: recruits need food';
     if (this.nova >= 1 && this.enemies.length > 4) return 'Arcane Nova is ready! Tap the button';
     if (this.weapons.length) {

@@ -21,6 +21,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SRC = process.argv[2];
+// Optional second folder: a checkout of github.com/series-ai/jam-ready-assets (Kenney + Quaternius + KayKit, all CC0).
+const JRA = process.argv[3];
 if (!SRC) {
   console.error('usage: node tools/build-assets.mjs <kaykit clones folder>');
   process.exit(1);
@@ -100,7 +102,7 @@ await character(
   `${ADV}/Characters/gltf/Barbarian.glb`,
   'worker.glb',
   ['Idle', 'Walking_A', '1H_Melee_Attack_Chop', 'Interact', 'Cheer', 'PickUp'],
-  ['1H_Axe_Offhand', 'Barbarian_Round_Shield', '2H_Axe', 'Mug', 'Barbarian_Cape'],
+  ['1H_Axe_Offhand', 'Barbarian_Round_Shield', '2H_Axe', 'Mug', 'Barbarian_Cape', 'Barbarian_Hat'],
 );
 await character(
   `${ADV}/Characters/gltf/Rogue.glb`,
@@ -108,26 +110,13 @@ await character(
   ['Idle', 'Walking_A', 'Interact', 'PickUp', 'Cheer', 'Sit_Floor_Idle'],
   ['Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Knife', 'Throwable'],
 );
-// Goblin horde: adventurer rigs that the game re-skins green and gives pointy ears.
-const GOBLIN_ANIMS = ['Walking_A', 'Running_A', '1H_Melee_Attack_Chop', '2H_Melee_Attack_Chop', 'Death_A', 'Idle'];
-await character(
-  `${ADV}/Characters/gltf/Rogue_Hooded.glb`,
-  'goblin.glb',
-  GOBLIN_ANIMS,
-  ['Knife_Offhand', '1H_Crossbow', '2H_Crossbow', 'Throwable'],
-);
-await character(
-  `${ADV}/Characters/gltf/Rogue.glb`,
-  'goblin_runner.glb',
-  GOBLIN_ANIMS,
-  ['1H_Crossbow', '2H_Crossbow', 'Throwable', 'Rogue_Cape'],
-);
-await character(
-  `${ADV}/Characters/gltf/Barbarian.glb`,
-  'orc.glb',
-  GOBLIN_ANIMS,
-  ['1H_Axe_Offhand', '1H_Axe', 'Mug', 'Barbarian_Round_Shield'],
-);
+// Goblin horde: Quaternius "Ultimate Monsters" orcs (CC0).
+if (JRA) {
+  const MON = `${JRA}/quaternius-ultimate-monsters/3D/monster/Big/glTF`;
+  const ORC_ANIMS = ['Walk', 'Run', 'Weapon', 'Death', 'Idle'];
+  await character(`${MON}/Orc.gltf`, 'goblin.glb', ORC_ANIMS);
+  await character(`${MON}/Orc_Skull.gltf`, 'goblin_runner.glb', ORC_ANIMS);
+}
 
 // ---------------------------------------------------------------- static props bundle
 
@@ -206,9 +195,27 @@ const PROPS = {
     'flag_blue',
   ],
   [`${ADV}/Assets/gltf`]: ['arrow', 'sword_1handed', 'crossbow_1handed', 'quiver', 'shield_round_color', 'axe_1handed'],
-  [`${SKEL}/Assets/gltf`]: ['Skeleton_Blade', 'Skeleton_Axe', 'Skeleton_Shield_Small_A', 'Skeleton_Shield_Large_A'],
   [DUN]: ['chest_gold', 'coin', 'coin_stack_large', 'banner_shield_blue', 'barrel_large', 'box_stacked'],
 };
+
+if (JRA) {
+  PROPS[`${JRA}/kenney-survival-kit/3D/nature/Models/GLB format`] = [
+    'tent-canvas',
+    'campfire-pit',
+    'campfire-stand',
+    'workbench-anvil',
+    'workbench',
+    'structure-floor',
+    'structure-canvas',
+    'structure-roof',
+    'fence-fortified',
+    'resource-wood',
+    'resource-planks',
+    'resource-stone-large',
+  ];
+  PROPS[`${JRA}/kaykit-resource-bits/3D/misc/Assets/gltf`] = ['Gold_Bar', 'Gold_Bars_Stack_Large', 'Gold_Bars_Stack_Small', 'Food_Pile_Large'];
+  PROPS[`${JRA}/kenney-castle-kit/3D/fantasy/Models/GLB format`] = ['siege-ballista', 'flag-banner-long'];
+}
 
 const findFile = (dir, name) => {
   const stack = [dir];
