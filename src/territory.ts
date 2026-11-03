@@ -16,8 +16,9 @@ const MASK = 272; // mask pixels (2 per unit: soft edges after linear filtering)
 const GROW = 1.6; // seconds for green to cover a land
 
 // Chunky, rounded low-poly trees read best with cartoon shading and outlines.
-const WILD_TREES = ['Tree_4_A_Color1', 'Tree_5_A_Color1', 'Tree_1_A_Color1', 'Tree_4_A_Color1', 'Tree_3_A_Color1', 'tree_single_A'];
-const MEADOW_TREES = ['Tree_1_A_Color1', 'tree_single_B', 'Tree_1_A_Color1'];
+// Quaternius RTS pack trees: same style as the buildings.
+const WILD_TREES = ['Resource_PineTree_Group', 'Resource_Tree_Group', 'Resource_PineTree_Group', 'Resource_Tree1', 'Resource_Tree2'];
+const MEADOW_TREES = ['Resource_Tree1', 'Resource_Tree2', 'Resource_Tree1'];
 
 const GRASS: MapPalette = {
   ground: 0x58c450,
@@ -159,8 +160,11 @@ export class Territory {
         }
       };
       const trees = land.id === 0 ? 4 : 8;
-      for (let i = 0; i < trees; i++) addWild(WILD_TREES[Math.floor(rng() * WILD_TREES.length)], 2.6 + rng() * 1.4, 'y', 2.2);
-      for (let i = 0; i < 4; i++) addWild(['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3'][i % 3], 0.9 + rng() * 1.1, 'max', 1.4);
+      for (let i = 0; i < trees; i++) {
+        const n = WILD_TREES[Math.floor(rng() * WILD_TREES.length)];
+        addWild(n, n.includes('Group') ? 5 + rng() * 1.5 : 2.6 + rng() * 1.2, n.includes('Group') ? 'max' : 'y', n.includes('Group') ? 3.6 : 2.2);
+      }
+      for (let i = 0; i < 4; i++) addWild(['Resource_Rock_1', 'Resource_Rock_2', 'Rock_Medium_1'][i % 3], 1 + rng() * 1, 'max', 1.4);
       for (let i = 0; i < 5; i++) addWild('Bush_1_A_Color1', 0.9 + rng() * 0.6, 'max', 1.2);
 
       // A few meadow trees and flowering bushes pop up once the land is yours.
@@ -169,7 +173,7 @@ export class Territory {
         const p = inside(2);
         if (!p || nearFence(p[0], p[1], 2.2)) continue;
         const tree = i < 3;
-        const o = this.assets.prop(tree ? MEADOW_TREES[i % MEADOW_TREES.length] : 'Bush_1_A_Color1', tree ? 3.2 + rng() * 1.2 : 1 + rng() * 0.4, tree ? 'y' : 'max');
+        const o = this.assets.prop(tree ? MEADOW_TREES[i % MEADOW_TREES.length] : 'Bush_1_A_Color1', tree ? 2.8 + rng() * 1 : 1 + rng() * 0.4, tree ? 'y' : 'max');
         o.position.set(p[0], 0, p[1]);
         o.rotation.y = rng() * 6.28;
         o.userData.s = o.scale.x;
@@ -232,16 +236,16 @@ export class Territory {
     };
     const spots: [number, number][] = [];
     const ok = (x: number, z: number, gap: number) => !spots.some(([a, b]) => Math.hypot(a - x, b - z) < gap);
-    for (let i = 0; i < 2600 && spots.length < 220; i++) {
+    for (let i = 0; i < 2600 && spots.length < 120; i++) {
       const x = (rng() - 0.5) * 112;
       const z = (rng() - 0.5) * 112;
       const d = Math.max(Math.abs(x), Math.abs(z));
-      if (d < 32 || d > 50 || !ok(x, z, 2.2)) continue;
+      if (d < 32 || d > 50 || !ok(x, z, 4.2)) continue;
       // Low growth only on the camera side near the edge, so nothing hides the king.
       const near = (x > 31 && x < 42) || (z > 31 && z < 42);
       spots.push([x, z]);
       if (near) add('Bush_1_A_Color1', 1.2 + rng() * 0.8, 'max', x, z);
-      else add(WILD_TREES[Math.floor(rng() * WILD_TREES.length)], 4 + rng() * 3, 'y', x, z);
+      else add(rng() > 0.5 ? 'Resource_PineTree_Group' : 'Resource_Tree_Group', 6 + rng() * 2.5, 'max', x, z);
     }
     // Boulders: big on the far sides like valley walls, small on the camera side.
     for (let i = 0; i < 90; i++) {
@@ -250,7 +254,7 @@ export class Territory {
       const d = Math.max(Math.abs(x), Math.abs(z));
       if (d < 44 || d > 64) continue;
       const near = x > 40 || z > 40;
-      add(['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3'][i % 3], near ? 3 + rng() * 3 : 9 + rng() * 9, 'max', x, z);
+      add(near ? 'Resource_Rock_1' : ['Mountain_Group_1', 'Mountain_Group_2', 'MountainLarge_Single'][i % 3], near ? 2 + rng() * 2 : 14 + rng() * 10, 'max', x, z);
     }
     for (let i = 0; i < 60; i++) {
       const x = (rng() - 0.5) * 80;
@@ -309,14 +313,17 @@ export class Territory {
   fadeAround(focus: THREE.Vector3, dt: number) {
     const k = Math.SQRT1_2;
     for (const f of this.fades) {
-      if (!f.o.visible) continue;
+      if (!f.o.visible && f.a > 0.02) continue;
+      if (f.o.scale.x < 0.01) continue;
       const dx = f.o.position.x - focus.x;
       const dz = f.o.position.z - focus.z;
       const along = (dx + dz) * k;
       const side = Math.abs(dx - dz) * k;
-      const want = along > -0.5 && along < 18 && side < 3.5 + along * 0.3 ? 0.2 : 1;
+      const want = along > -0.5 && along < 18 && side < 3.5 + along * 0.3 ? 0 : 1;
       if (want === f.a) continue;
       f.a = want < f.a ? Math.max(want, f.a - dt * 4) : Math.min(want, f.a + dt * 3);
+      // Fade out completely (and stop drawing) so nothing washes over the king.
+      f.o.visible = f.a > 0.02;
       for (const m of f.mats) {
         m.transparent = f.a < 1;
         m.opacity = f.a;

@@ -252,103 +252,86 @@ export function makeUnit(type: 'archer' | 'knight'): UnitRig {
 export type Era = 'wood' | 'stone';
 export const eraFor = (castleLevel: number): Era => (castleLevel >= 3 ? 'stone' : 'wood');
 
-/** A timber lookout platform: up to six archers stand on top; level 2 mounts a ballista. */
-export function makeLookout() {
-  const root = new THREE.Group();
-  // Tall stilts, so archers stand high over the fences.
-  const base = A.prop('structure-floor', 2.8, 'max');
-  base.scale.y *= 1.9;
-  root.add(base);
-  const H = new THREE.Box3().setFromObject(base).max.y;
-  for (const [x, z] of [
-    [-1.3, -1.3],
-    [1.3, 1.3],
+/**
+ * Height of the walkable top of a model at its centre: casts down from above at a few points and
+ * takes the lowest hit, so thin flag poles and spires are ignored.
+ */
+function standHeight(o: THREE.Object3D) {
+  o.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(o);
+  const ray = new THREE.Raycaster();
+  const hits: number[] = [];
+  const c = box.getCenter(new THREE.Vector3());
+  const r = Math.min(box.max.x - box.min.x, box.max.z - box.min.z) * 0.15;
+  for (const [dx, dz] of [
+    [0, 0],
+    [r, 0],
+    [-r, 0],
+    [0, r],
+    [0, -r],
   ]) {
-    const f = A.prop('flag_blue', 1.5);
-    f.position.set(x, H, z);
-    root.add(f);
+    ray.set(new THREE.Vector3(c.x + dx, box.max.y + 1, c.z + dz), new THREE.Vector3(0, -1, 0));
+    const h = ray.intersectObject(o, true)[0];
+    if (h) hits.push(h.point.y);
   }
-  const ballista = A.prop('siege-ballista', 1.4, 'max');
-  ballista.position.set(0, H, -0.85);
-  ballista.visible = false;
+  hits.sort((x, y) => x - y);
+  return hits.length ? hits[Math.floor(hits.length / 2)] : box.max.y;
+}
+
+/** A watchtower archers climb onto: timber scaffolding, stone in the stone era. Level 2 adds a ballista. */
+export function makeLookout(era: Era = 'wood', level = 0) {
+  const root = new THREE.Group();
+  const name = era === 'wood' ? `WatchTower_FirstAge_Level${level ? 3 : 2}` : `WatchTower_SecondAge_Level${level ? 3 : 1}`;
+  const base = A.prop(name, 5.6, 'y');
+  root.add(base);
+  const H = standHeight(base);
+  const ballista = A.prop('siege-ballista', 1.2, 'max');
+  ballista.position.set(0, H, -0.35);
+  ballista.visible = level > 0;
   root.add(ballista);
+  // Archers stand close together on the top floor.
   const slots: THREE.Vector3[] = [];
-  for (let i = 0; i < 6; i++) slots.push(new THREE.Vector3(((i % 3) - 1) * 0.8, H, i < 3 ? 0.45 : -0.3));
+  for (let i = 0; i < 6; i++) slots.push(new THREE.Vector3(((i % 3) - 1) * 0.42, H, i < 3 ? 0.3 : -0.2));
   return { root, ballista, slots, height: H };
 }
 
-/** A straight run of fence `len` long along local x: timber palisade, stone fence or castle wall. */
+/** A straight run of wall `len` long along local x: timber planks, then stone. */
 export function makeFenceRun(tier: 'wood' | 'stone' | 'castle', len: number) {
   const stage = new THREE.Group();
-  const name = tier === 'wood' ? 'fence-fortified' : tier === 'stone' ? 'fence_stone_straight' : 'wall_straight';
-  const want = tier === 'wood' ? 1.25 : tier === 'stone' ? 2.25 : 2.7;
+  const name = tier === 'wood' ? 'Wall_FirstAge' : 'Wall_SecondAge';
+  const want = tier === 'wood' ? 2.2 : 2.5;
   const n = Math.max(1, Math.round(len / want));
   const piece = len / n;
   for (let i = 0; i < n; i++) {
-    const p = A.prop(name, 1, 'max');
+    const p = A.prop(name, 1, 'x');
     const holder = new THREE.Group();
     holder.add(p);
-    const box = new THREE.Box3().setFromObject(holder);
-    const sz = box.getSize(new THREE.Vector3());
-    if (sz.z > sz.x) p.rotation.y = Math.PI / 2;
-    const k = (piece + 0.04) / Math.max(sz.x, sz.z);
-    holder.scale.setScalar(tier === 'wood' ? k * 1.15 : k);
-    holder.scale.x = k;
+    // Long side along x, a little taller than the model so it reads as a proper wall.
+    // The source walls are thin and low at this scale: make them chest-high and chunky.
+    if (tier === 'wood') holder.scale.set(piece + 0.05, 4.2, 5);
+    else holder.scale.set(piece + 0.05, tier === 'castle' ? 6.6 : 5.6, 2.4);
     holder.position.x = -len / 2 + piece * (i + 0.5);
     stage.add(holder);
   }
-  const g = bakeStatic(stage, [1, 1, 1]);
-  return g;
+  return bakeStatic(stage, [1, 1, 1]);
 }
 
-/** The castle at each level: a log camp, a wooden hall, a timber fort, a stone keep, a castle, a citadel. */
+/** The keep, level by level: a fenced campfire, a timber hall, a great hall, a wooden fort, a castle, a fortress. */
+const KEEP_MODELS: [string, number, 'y' | 'max'][] = [
+  ['TownCenter_FirstAge_Level1', 4.6, 'max'],
+  ['Barracks_FirstAge_Level1', 5.6, 'max'],
+  ['Temple_FirstAge_Level1', 6.6, 'y'],
+  ['Wonder_FirstAge_Level3', 9, 'max'],
+  ['Temple_SecondAge_Level3', 8.6, 'y'],
+  ['Wonder_SecondAge_Level3', 11, 'max'],
+];
+
 export function makeCastle(level: number) {
   const root = new THREE.Group();
-  const add = (name: string, size: number, x: number, z: number, ry = 0, axis: 'y' | 'max' = 'max') => {
-    const o = A.prop(name, size, axis);
-    o.position.set(x, 0, z);
-    o.rotation.y = ry;
-    root.add(o);
-    return o;
-  };
-  switch (level) {
-    case 0:
-      // Just a few logs, a tent and a campfire.
-      add('tent', 2.6, -0.6, -0.4, 0.3);
-      add('resource_lumber', 1.4, 1.6, 0.6, 0.8);
-      add('resource_lumber', 1.2, -1.9, 1.2, -0.4);
-      add('barrel', 0.8, 1.4, -1.2);
-      root.add(campfire());
-      break;
-    case 1:
-      add('building_home_B_blue', 4.4, 0, -0.3, Math.PI);
-      add('resource_lumber', 1.2, 2.4, 1.4, 0.6);
-      root.add(campfire(-2.2, 1.8));
-      break;
-    case 2:
-      add('building_home_A_blue', 5.2, 0, -0.4, Math.PI);
-      add('building_home_B_blue', 3.2, -2.9, 1.2, Math.PI + 0.4);
-      add('flag_blue', 2.6, -2.6, 2.4, 0, 'y');
-      add('flag_blue', 2.6, 2.6, 2.4, 0, 'y');
-      break;
-    case 3:
-      add('building_tower_B_blue', 7.2, 0, -0.6, Math.PI, 'y');
-      add('building_home_A_blue', 3.4, -2.6, 0.8, Math.PI);
-      add('flag_blue', 2.8, 2.4, 2.4, 0, 'y');
-      break;
-    case 4:
-      add('building_castle_blue', 8.5, 0, 0, 0, 'y');
-      add('flag_blue', 2.8, -2.8, 3.4, 0, 'y');
-      add('flag_blue', 2.8, 2.8, 3.4, 0, 'y');
-      break;
-    default:
-      add('building_castle_blue', 10, 0, 0, 0, 'y');
-      add('building_tower_A_blue', 7, -4.6, -1.4, 0, 'y');
-      add('building_tower_A_blue', 7, 4.6, -1.4, 0, 'y');
-      add('flag_blue', 3.2, -3.2, 4, 0, 'y');
-      add('flag_blue', 3.2, 3.2, 4, 0, 'y');
-      break;
-  }
+  const [name, size, axis] = KEEP_MODELS[Math.min(level, KEEP_MODELS.length - 1)];
+  const o = A.prop(name, size, axis);
+  root.add(o);
+  if (level === 0) root.add(campfire(0, 0.2));
   const lamp = new THREE.PointLight(0xffb357, 6, 9, 1.6);
   lamp.position.set(0, 2.2, 3.4);
   root.add(lamp);
@@ -357,12 +340,6 @@ export function makeCastle(level: number) {
 
 function campfire(x = 0.4, z = 2.0) {
   const g = new THREE.Group();
-  for (let i = 0; i < 4; i++) {
-    const log = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.8, 6), MAT.woodDark);
-    log.rotation.set(Math.PI / 2, (i / 4) * Math.PI * 2, 0.4);
-    log.position.y = 0.12;
-    g.add(log);
-  }
   const fire = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 7), MAT.fire);
   fire.position.y = 0.35;
   g.add(fire);
@@ -380,71 +357,22 @@ export interface WorkshopRig {
   anim?: THREE.Object3D;
 }
 
-export function makeShop(kind: 'range' | 'barracks' | 'forge' | 'bowyer', era: Era = 'stone'): WorkshopRig {
+/** Workshops grow with their own level (1-3) and switch to stone with the castle. */
+export function makeShop(kind: 'range' | 'barracks' | 'forge' | 'bowyer', era: Era = 'wood', level = 1): WorkshopRig {
   const root = new THREE.Group();
-  const add = (name: string, size: number, x: number, z: number, ry = 0, axis: 'y' | 'max' = 'max') => {
-    const o = A.prop(name, size, axis);
-    o.position.set(x, 0, z);
-    o.rotation.y = ry;
-    root.add(o);
-    return o;
-  };
-  const out: WorkshopRig = { root, rack: new THREE.Vector3(0, 0, 2.7) };
-  if (era === 'wood') {
-    // Rough timber camp versions: tents, lean-tos and workbenches.
-    switch (kind) {
-      case 'range':
-        add('tent', 2.8, 0, -0.6, 0, 'max');
-        add('target', 1.3, 2.3, 0.8);
-        add('target', 1.3, -2.3, 0.8);
-        add('bucket_arrows', 0.7, 0.8, 1.6);
-        break;
-      case 'barracks':
-        add('tent', 2.8, -1.3, -0.4, 0.2);
-        add('tent', 2.4, 1.5, -0.8, -0.3);
-        add('campfire-pit', 0.9, 0.2, 1.0);
-        add('weaponrack', 1.2, 0.4, 1.6);
-        out.rack = new THREE.Vector3(0, 0, 2.6);
-        break;
-      case 'forge':
-        add('building_scaffolding', 2.8, 0, -1.0, 0, 'max');
-        add('workbench-anvil', 1.1, -0.6, 0.6);
-        add('campfire-stand', 1.1, 1.3, 0.4);
-        add('weaponrack', 1.2, 0.9, 2.1);
-        out.rack = new THREE.Vector3(0.9, 0, 2.6);
-        out.chimney = new THREE.Vector3(1.3, 1.2, 0.4);
-        break;
-      case 'bowyer':
-        add('tent', 2.6, 0, -0.8, 0, 'max');
-        add('workbench', 1.1, -0.9, 0.8);
-        add('resource-planks', 1.2, 1.5, 0.6);
-        out.rack = new THREE.Vector3(0.8, 0, 2.6);
-        break;
-    }
-    return out;
-  }
-  const model = {
-    range: 'building_archeryrange_blue',
-    barracks: 'building_barracks_blue',
-    forge: 'building_blacksmith_blue',
-    bowyer: 'building_market_blue',
-  }[kind];
-  const b = A.prop(model, 4.6, 'max');
-  b.rotation.y = Math.PI;
-  root.add(b);
+  const out: WorkshopRig = { root, rack: new THREE.Vector3(0, 0, 2.8) };
+  const age = era === 'wood' ? 'FirstAge' : 'SecondAge';
+  const lv = Math.max(1, Math.min(3, level));
+  let model: THREE.Object3D;
   if (kind === 'forge') {
-    add('weaponrack', 1.3, 0.9, 2.4, 0, 'y');
-    out.rack = new THREE.Vector3(0.9, 0, 2.8);
-    out.chimney = new THREE.Vector3(-0.6, 4.2, -0.4);
-  } else if (kind === 'bowyer') {
-    add('resource_lumber', 1.0, -1.6, 2.2, 0, 'y');
-    out.rack = new THREE.Vector3(0.8, 0, 2.8);
-  } else if (kind === 'range') {
-    add('target', 1.3, 2.4, 1.4, 0, 'y');
-    add('bucket_arrows', 0.7, -1.8, 2.2, 0, 'y');
+    model = A.prop('Blacksmith', 4.4 + lv * 0.3, 'max');
+    out.rack = new THREE.Vector3(1.2, 0, 2.8);
+    out.chimney = new THREE.Vector3(-0.8, 3.4, -0.6);
   } else {
-    add('weaponrack', 1.2, -2.0, 1.8, 0, 'y');
+    const base = kind === 'range' ? 'Archery' : 'Barracks';
+    model = A.prop(`${base}_${age}_Level${lv}`, 4.2 + lv * 0.5, 'max');
   }
+  root.add(model);
   return out;
 }
 

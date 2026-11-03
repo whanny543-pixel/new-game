@@ -1690,8 +1690,9 @@ export class Conquest {
     const toCx = Math.sign((L.x0 + L.x1) / 2 - sp.x) || 1;
     const toCz = Math.sign((L.z0 + L.z1) / 2 - sp.z) || 1;
     if (!l) {
-      const rig = S.makeLookout();
+      const rig = S.makeLookout(S.eraFor(this.castleLevel), 0);
       const pos = new THREE.Vector3(sp.x, 0, sp.z);
+      this.popIn(rig.root);
       rig.root.position.copy(pos);
       this.root.add(rig.root);
       const pad = new Pad(new THREE.Vector3(sp.x + toCx * 2.6, 0, sp.z));
@@ -1703,19 +1704,27 @@ export class Conquest {
       this.fx.text(v2.copy(pos).setY(3.5), 'Lookout!', 'good');
     } else {
       l.level = Math.min(1, lvl);
-      l.ballista.visible = true;
-      l.grow = 0.4;
+      this.rebuildLookout(l);
       this.fx.text(v2.copy(l.pos).setY(4), 'Ballista + 2 slots!', 'good');
     }
+  }
+
+  /** Swaps a lookout's model (taller tower with a ballista, or the stone version). */
+  private rebuildLookout(l: Lookout) {
+    const rig = S.makeLookout(S.eraFor(this.castleLevel), l.level);
+    rig.root.position.copy(l.pos);
+    this.root.remove(l.root);
+    this.root.add(rig.root);
+    l.root = rig.root;
+    l.ballista = rig.ballista;
+    l.slots = rig.slots;
+    this.popIn(rig.root);
+    this.fx.p.build(v1.copy(l.pos).setY(0.5));
   }
 
   private updateLookouts(dt: number) {
     let onPad: Lookout | null = null;
     for (const l of this.lookouts.values()) {
-      l.grow = Math.min(1, l.grow + dt * 3);
-      const g = l.grow;
-      const s = g < 1 ? 1 + Math.sin(g * Math.PI) * 0.15 : 1;
-      l.root.scale.set(s, Math.max(0.02, Math.min(1, g * 1.2)) * s, s);
       const slots = LOOKOUT.slots[l.level];
       const filled = l.units.slice(0, slots).filter(Boolean).length;
       const active = this.heroAlive && Math.hypot(this.heroPos.x - l.pad.pos.x, this.heroPos.z - l.pad.pos.z) < 1.2;
@@ -1757,7 +1766,7 @@ export class Conquest {
     const kind = sp.kind as Shop['kind'];
     let shop = this.shops.get(sp.id);
     if (!shop) {
-      const rig = S.makeShop(kind, S.eraFor(this.castleLevel));
+      const rig = S.makeShop(kind, S.eraFor(this.castleLevel), 1);
       const pos = new THREE.Vector3(sp.x, 0, sp.z);
       rig.root.position.copy(pos);
       this.root.add(rig.root);
@@ -1790,6 +1799,14 @@ export class Conquest {
       this.fx.text(v2.copy(pos).setY(4), kind === 'range' ? 'Archery Range!' : kind === 'barracks' ? 'Barracks!' : 'Forge! Making armour', 'good');
     } else {
       shop.level = Math.min(3, lvl + 1);
+      // The building itself grows to its next level.
+      const rig = S.makeShop(shop.kind, S.eraFor(this.castleLevel), shop.level);
+      rig.root.position.copy(shop.pos);
+      this.root.remove(shop.rig.root);
+      this.root.add(rig.root);
+      shop.rig = rig;
+      shop.rackWorld = rig.rack.clone().add(shop.pos);
+      this.popIn(rig.root);
       this.fx.text(v2.copy(shop.pos).setY(4), kind === 'forge' ? `Now forging: ${TIER_NAMES[shop.level]} kits` : 'Faster training!', 'good');
       if (shop.recruit && kind !== 'forge') shop.recruit.def.costs[0] = Math.max(6, Math.round(shop.recruit.def.costs[0] * 0.7));
     }
@@ -1877,7 +1894,11 @@ export class Conquest {
     let m = this.mines.get(sp.id);
     if (!m) {
       const pos = new THREE.Vector3(sp.x, 0, sp.z);
-      const b = S.prop('building_mine_blue', 3.6, 'max');
+      const b = new THREE.Group();
+      b.add(S.prop('Mine', 4.2, 'max'));
+      const ore = S.prop('Resource_Gold_1', 1.8, 'max');
+      ore.position.set(-2.4, 0, 0.6);
+      b.add(ore);
       b.position.copy(pos);
       this.root.add(b);
       this.popIn(b);
@@ -2146,8 +2167,9 @@ export class Conquest {
       this.hud.banner(level >= 4 ? 'Castle walls!' : 'Stone walls!', false);
     }
     if (S.eraFor(level) !== S.eraFor(prev)) {
+      for (const l of this.lookouts.values()) this.rebuildLookout(l);
       for (const shop of this.shops.values()) {
-        const rig = S.makeShop(shop.kind, S.eraFor(level));
+        const rig = S.makeShop(shop.kind, S.eraFor(level), shop.level);
         rig.root.position.copy(shop.pos);
         this.root.remove(shop.rig.root);
         this.root.add(rig.root);
@@ -2196,7 +2218,8 @@ export class Conquest {
       const p = h.o.position;
       return p.x > L.x0 && p.x < L.x1 && p.z > L.z0 && p.z < L.z1;
     }).length;
-    const names = this.castleLevel >= 3 ? ['building_home_A_blue', 'building_home_B_blue'] : ['tent', 'tent-canvas'];
+    const lv = Math.min(3, 1 + Math.floor(this.castleLevel / 2));
+    const names = this.castleLevel >= 3 ? [`Houses_SecondAge_1_Level${lv}`, `Houses_SecondAge_2_Level${lv}`] : [`Houses_FirstAge_1_Level${lv}`, `Houses_FirstAge_2_Level${lv}`];
     for (let i = have; i < want; i++) {
       for (let tries = 0; tries < 40; tries++) {
         const x = L.x0 + 3 + Math.random() * 14;
@@ -2205,7 +2228,7 @@ export class Conquest {
         if (SPOTS.some((s) => Math.hypot(s.x - x, s.z - z) < 5)) continue;
         if (this.houses.some((h) => Math.hypot(h.o.position.x - x, h.o.position.z - z) < 4)) continue;
         if ([...this.mines.values()].some((m) => m.pos.distanceTo(v1.set(x, 0, z)) < 5)) continue;
-        const o = S.prop(names[i % 2], names[0] === 'tent' ? 2.4 : 3.4, 'max');
+        const o = S.prop(names[i % 2], 3.4, 'max');
         o.position.set(x, 0, z);
         o.rotation.y = Math.atan2(-x, -z);
         o.scale.y = 0.01;

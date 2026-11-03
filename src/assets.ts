@@ -12,6 +12,7 @@ import raiderUrl from './assets/models/raider.glb?url';
 import bruteUrl from './assets/models/brute.glb?url';
 import propsUrl from './assets/models/props.glb?url';
 import natureUrl from './assets/models/nature.glb?url';
+import rtsUrl from './assets/models/rts.glb?url';
 import villagerUrl from './assets/models/villager.glb?url';
 
 // 3D models (all CC0): KayKit by Kay Lousberg (Adventurers 2.0, Medieval Hexagon, Forest Nature), Kenney (kenney.nl),
@@ -171,7 +172,7 @@ export class Assets {
     loader.setMeshoptDecoder(MeshoptDecoder);
     const names = Object.keys(CHAR_URLS) as CharName[];
     let done = 0;
-    const total = names.length + 2;
+    const total = names.length + 3;
     const tick = () => onProgress(++done / total);
     // Inlined builds embed models as data: URLs. Decode those directly rather than fetching them,
     // since some hosts (sandboxed pages) block fetch() of data: URLs.
@@ -187,9 +188,10 @@ export class Assets {
       return g;
     };
 
-    const [props, nature, ...chars] = await Promise.all([load(propsUrl), load(natureUrl), ...names.map((n) => load(CHAR_URLS[n]))]);
+    const [props, nature, rts, ...chars] = await Promise.all([load(propsUrl), load(natureUrl), load(rtsUrl), ...names.map((n) => load(CHAR_URLS[n]))]);
     a.prepareProps(props);
     a.prepareProps(nature, true);
+    a.prepareProps(rts);
     names.forEach((n, i) => a.prepareChar(n, chars[i]));
     return a;
   }

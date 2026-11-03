@@ -317,6 +317,7 @@ async function bundleProps(map, file, textures = null) {
       }
     }
     const sharp = (await import('sharp')).default;
+    if (!bundle.getRoot().listTextures().length) return finish(bundle, file);
     await bundle.transform(textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [textures, textures], quality: 82 }));
   }
   await finish(bundle, file);
@@ -358,6 +359,57 @@ if (JRA) {
     512,
   );
   fs.copyFileSync(`${NAT}/License.txt`, path.join(OUT, 'LICENSE-Quaternius-StylizedNature.txt'));
+}
+
+// Optional third folder: github.com/trebeljahr/quaternius-showcase (public/glb), Quaternius packs as GLB (CC0).
+const QS = process.argv[4];
+if (QS) {
+  const RTS = `${QS}/real_time_strategy_pack`;
+  const lv = (base, n = 3) => Array.from({ length: n }, (_, i) => `${base}_Level${i + 1}`);
+  await bundleProps(
+    {
+      [RTS]: [
+        ...lv('TownCenter_FirstAge'),
+        ...lv('TownCenter_SecondAge'),
+        ...lv('Archery_FirstAge'),
+        ...lv('Archery_SecondAge'),
+        ...lv('Barracks_FirstAge'),
+        ...lv('Barracks_SecondAge'),
+        ...lv('WatchTower_FirstAge'),
+        ...lv('WatchTower_SecondAge'),
+        ...lv('Houses_FirstAge_1'),
+        ...lv('Houses_FirstAge_2'),
+        ...lv('Houses_SecondAge_1'),
+        ...lv('Houses_SecondAge_2'),
+        'Wall_FirstAge',
+        'Wall_SecondAge',
+        'WallTowers_FirstAge',
+        'WallTowers_SecondAge',
+        'Mine',
+        'Resource_Gold_1',
+        'Resource_Gold_2',
+        'Resource_Gold_3',
+        'Resource_PineTree_Group',
+        'Resource_Tree_Group',
+        'Resource_PineTree',
+        'Resource_Tree1',
+        'Resource_Tree2',
+        'Resource_Rock_1',
+        'Resource_Rock_2',
+        'Rock_Group',
+        'MountainLarge_Single',
+        'Mountain_Group_1',
+        'Mountain_Group_2',
+        'Logs',
+        'Crate_Stack1',
+        'Barrel',
+        'Windmill_FirstAge',
+      ],
+      [`${QS}/medieval_village_pack`]: ['Blacksmith', 'Bonfire_Lit', 'Well', 'Cart', 'MarketStand_1'],
+    },
+    'rts.glb',
+    256,
+  );
 }
 
 fs.copyFileSync(`${ADV}/LICENSE.txt`, path.join(OUT, 'LICENSE-KayKit.txt'));
