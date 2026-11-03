@@ -262,11 +262,18 @@ export class Particles {
     this.emit({ pos, count: 10, color: [0xffffff, 0xffd34d, 0xff9a2e], speed: 8, up: 1.5, size: 0.5, life: 0.35, gravity: 4, drag: 4, shape: 1 });
   }
 
+  /** Cartoon "poof": a puff of white cloud, a few tumbling bits and a spark of stars. */
   death(pos: THREE.Vector3, color: number, big = false) {
     const n = big ? 3 : 1;
-    this.emit({ pos, count: 6 * n, color: [color, 0x2a1d14], speed: 4 * n, up: 3, size: 0.28 * n, sizeEnd: 0.1, life: 0.7, gravity: 14, drag: 1, glow: false });
-    this.emit({ pos, count: 2 * n, color: [0xd8c2a0, 0xbfa682], speed: 1.4 * n, up: 1, size: 0.8 * n, sizeEnd: 1.5 * n, life: 0.55, gravity: -0.5, drag: 2.5, shape: 2, glow: false });
-    this.emit({ pos, count: 5 * n, color: [0xffe28a, 0xffffff], speed: 5 * n, up: 2, size: 0.3, life: 0.35, gravity: 2, drag: 3 });
+    this.emit({ pos, count: 5 * n, color: [0xffffff, 0xf4efe8, 0xe8e2da], spread: 0.3 * n, speed: 2.2 * n, up: 1.2, size: 0.9 * n, sizeEnd: 2.0 * n, life: 0.45, gravity: -1, drag: 4, shape: 2, glow: false });
+    this.emit({ pos, count: 4 * n, color: [color, 0xffffff], speed: 4.5 * n, up: 4, size: 0.24 * n, sizeEnd: 0.08, life: 0.6, gravity: 16, drag: 1, glow: false });
+    this.emit({ pos, count: 3 * n, color: [0xffffff, 0xfff4b0], speed: 6 * n, up: 2, size: 0.35, life: 0.3, gravity: 0, drag: 4, shape: 1 });
+  }
+
+  /** An ogre's club hits the ground: a ring of dust and flying grit. */
+  slam(pos: THREE.Vector3) {
+    this.emit({ pos, count: 14, color: [0xe9dcc4, 0xd8c6a6, 0xffffff], spread: 0.4, speed: 7, up: 0.6, size: 1.1, sizeEnd: 2.2, life: 0.55, gravity: 0, drag: 5, shape: 2, glow: false });
+    this.emit({ pos, count: 10, color: [0x8a6a48, 0x6a5038], speed: 6, up: 6, size: 0.22, sizeEnd: 0.1, life: 0.7, gravity: 18, drag: 0.6, glow: false });
   }
 
   dust(pos: THREE.Vector3, amount = 1) {

@@ -4,7 +4,7 @@ import * as M from './models';
 import * as S from './structures';
 import type { Horde } from './horde';
 import { Plot } from './plot';
-import { BASE_STATS, xpForLevel, type HeroStats, type Perk } from './perks';
+import { BASE_STATS, type HeroStats, type Perk } from './perks';
 import type { Fx } from './fx';
 import type { Sfx } from './audio';
 import type { Hud } from './hud';
@@ -340,7 +340,9 @@ export class Conquest {
   private pickupComboT = 0;
   private heroBar: HTMLElement;
   private giveT = 0;
-  private novaRate = 1;
+  private troopHp = 1;
+  /** Things that just got built, bouncing up out of the ground. */
+  private pops: { o: THREE.Object3D; t: number; s: THREE.Vector3 }[] = [];
 
   // Keep
   keep = { root: new THREE.Group(), model: null as THREE.Object3D | null };
@@ -406,7 +408,7 @@ export class Conquest {
     this.stats.maxHp *= 1 + 0.15 * lv('armor');
     this.stats.speed *= 1 + 0.05 * lv('boots');
     this.stats.allies *= 1 + 0.08 * lv('banner');
-    this.novaRate = 1 + 0.12 * lv('scepter');
+    this.troopHp = 1 + 0.1 * lv('scepter');
     this.heroHp = this.stats.maxHp;
     scene.add(this.root);
 
@@ -648,6 +650,7 @@ export class Conquest {
     this.updatePlots(dt);
     this.updateFences(dt);
     this.updateKeep(dt);
+    this.updatePops(dt);
     this.updateVillagers(dt);
     this.territory.update(dt);
     this.territory.fadeAround(this.heroPos, dt);
@@ -1063,9 +1066,16 @@ export class Conquest {
         if (!faceX && !faceZ) e.facing = lerpAngle(e.facing, Math.atan2(dx, dz), Math.min(1, dt * 8));
       }
       if (attack && e.atkCd <= 0) {
-        e.atkCd = t.boss ? 1.4 : 1.0;
+        e.atkCd = t.boss ? 1.6 : 1.0;
         e.lunge = 1;
         attack();
+        if (t.boss) {
+          // The brute's axe slams the ground.
+          v1.set(e.x + Math.sin(e.facing) * 1.6, 0.2, e.z + Math.cos(e.facing) * 1.6);
+          this.fx.p.slam(v1);
+          this.fx.ring(v1, 0xffffff, 4, 0.4);
+          this.fx.shake = Math.max(this.fx.shake, 0.35);
+        }
       }
       e.moving = moved;
 
@@ -1166,15 +1176,6 @@ export class Conquest {
     if (Math.random() < this.stats.greed) coins++;
     for (let i = 0; i < coins; i++) this.dropCoin(v1, e.type.boss ? 4 : 1.6);
 
-    this.nova = Math.min(1, this.nova + (e.type.boss ? 0.3 : this.novaRate / NOVA.killsToCharge));
-    this.hud.setNova(this.nova);
-    this.xp += e.type.boss ? 20 : 1;
-    while (this.xp >= xpForLevel(this.level)) {
-      this.xp -= xpForLevel(this.level);
-      this.level++;
-      this.pendingLevelUps++;
-    }
-    this.hud.setXp(this.level, this.xp / xpForLevel(this.level));
 
     this.combo = this.time - this.lastKill < 1.6 ? this.combo + 1 : 1;
     this.lastKill = this.time;
@@ -1760,6 +1761,7 @@ export class Conquest {
       const pos = new THREE.Vector3(sp.x, 0, sp.z);
       rig.root.position.copy(pos);
       this.root.add(rig.root);
+      this.popIn(rig.root);
       let rackMesh: THREE.InstancedMesh | null = null;
       if (kind === 'forge') {
         rackMesh = new THREE.InstancedMesh(S.kitGeometry(), S.weaponItemMaterial(), FORGE.rackMax);
@@ -1878,6 +1880,7 @@ export class Conquest {
       const b = S.prop('building_mine_blue', 3.6, 'max');
       b.position.copy(pos);
       this.root.add(b);
+      this.popIn(b);
       const pile = new THREE.InstancedMesh(S.barGeometry(), S.barMaterial(), MINE.pileMax);
       pile.count = 0;
       pile.castShadow = true;
@@ -1950,7 +1953,7 @@ export class Conquest {
       post: null,
       slot: -1,
       cd: Math.random() * 0.5,
-      hp: type === 'archer' ? ARCHER_HP[0] : KNIGHT_HP[0],
+      hp: Math.round((type === 'archer' ? ARCHER_HP[0] : KNIGHT_HP[0]) * this.troopHp),
       lastHit: -99,
       facing: Math.PI,
       swing: 0,
@@ -1977,7 +1980,28 @@ export class Conquest {
   }
 
   private unitMaxHp(u: Unit) {
-    return (u.type === 'archer' ? ARCHER_HP : KNIGHT_HP)[u.tier];
+    return Math.round((u.type === 'archer' ? ARCHER_HP : KNIGHT_HP)[u.tier] * this.troopHp);
+  }
+
+  /** New buildings pop up out of the ground with a springy overshoot. */
+  private popIn(o: THREE.Object3D) {
+    this.pops.push({ o, t: 0, s: o.scale.clone() });
+    o.scale.set(0.01, 0.01, 0.01);
+  }
+
+  private updatePops(dt: number) {
+    for (let i = this.pops.length - 1; i >= 0; i--) {
+      const p = this.pops[i];
+      p.t = Math.min(1, p.t + dt * 2.4);
+      // Damped spring: shoots past full size, wobbles, settles.
+      const k = 1 - Math.exp(-6 * p.t) * Math.cos(p.t * 13);
+      const sq = 1 + Math.sin(p.t * 13) * Math.exp(-6 * p.t) * 0.25;
+      p.o.scale.set(p.s.x * k * sq, p.s.y * k / sq, p.s.z * k * sq);
+      if (p.t >= 1) {
+        p.o.scale.copy(p.s);
+        this.pops.splice(i, 1);
+      }
+    }
   }
 
   private damageUnit(u: Unit, dmg: number) {

@@ -3,7 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { detailize } from './materials';
+import { toonify } from './toon';
 
 import heroUrl from './assets/models/king.glb?url';
 import archerUrl from './assets/models/archer.glb?url';
@@ -214,9 +214,10 @@ export class Assets {
               mat.alphaTest = 0.5;
               mat.side = THREE.DoubleSide;
             }
-          } else detailize(mat, 0.16, 0.9);
+          }
         }
       });
+      toonify(child);
       this.props.set(child.name, child);
       this.propBounds.set(child.name, new THREE.Box3().setFromObject(child));
     }
@@ -233,6 +234,7 @@ export class Assets {
       mat.roughness = 0.65;
       mat.metalness = 0;
     });
+    toonify(g.scene);
     // Height from the bind pose.
     const box = new THREE.Box3().setFromObject(g.scene);
     this.chars[name] = { scene: g.scene, clips: g.animations, height: Math.max(0.1, box.max.y - box.min.y) };

@@ -25,7 +25,8 @@ Built with Three.js and TypeScript (Vite), and packaged for the app stores with 
 
 **Art (all CC0, free for commercial use):**
 - KayKit by Kay Lousberg (www.kaylousberg.com): characters, castle and town buildings, trees, bushes and rocks (Forest Nature pack), gold bars.
-- The rock cliffs ringing the valley and the pines around it are built in code (`src/scenery.ts`).
+- Quaternius Stylized Nature MegaKit (quaternius.com): grass, flowers, clover, rocks, mushrooms.
+- KayKit Adventurers 2.0 + Character Animations: the king, knights, archers, the red raider horde and the brute warlord.
 - Kenney (www.kenney.nl): the timber palisade, lookout platforms, workbenches, campfires and the ballista.
 - Quaternius (quaternius.com): the goblin horde (Ultimate Monsters "Orc" and "Orc_Skull").
 
@@ -77,7 +78,7 @@ The script keeps only the animations the game uses, bundles all static models in
 | `src/realm.ts` | The map of lands, build spots, and all conquest tuning (costs, raids, troops) |
 | `src/conquest.ts` | Gameplay: king, squad, lookouts, fences and claiming, workshops, raids, economy, hints |
 | `src/territory.ts` | Meadows spreading over claimed land, the wild forest, mist |
-| `src/scenery.ts` | Flat-shaded rock cliffs and instanced pines |
+| `src/toon.ts` | Cartoon (banded) shading for every model |
 | `src/config.ts` | Player and goblin stats, kingdoms, armory |
 | `src/assets.ts` | Loads the 3D models; animated character rigs |
 | `src/horde.ts` | Baked instanced animations so hundreds of goblins stay cheap |
@@ -86,7 +87,7 @@ The script keeps only the animations the game uses, bundles all static models in
 | `src/world.ts`, `src/road.ts` | Ground, winding trails, lighting, static-mesh merging |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
 | `src/perks.ts` | Level-up perk deck |
-| `src/render.ts` | Post-processing: bloom, colour grade, vignette, adaptive quality |
+| `src/render.ts` | Post-processing: ink outlines, bloom, colour grade, vignette, adaptive quality |
 | `src/materials.ts` | PBR materials with world-space detail texture, baked environment light |
 | `src/particles.ts`, `src/fx.ts` | GPU particles, flying coins, damage numbers |
 | `src/hud.ts`, `src/style.css` | HUD, menus, health bars, level-up cards |

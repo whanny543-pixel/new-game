@@ -15,13 +15,14 @@ const EXTENT = 136; // world units covered by the mask
 const MASK = 272; // mask pixels (2 per unit: soft edges after linear filtering)
 const GROW = 1.6; // seconds for green to cover a land
 
-const WILD_TREES = ['Pine_1', 'Pine_2', 'Pine_4', 'Pine_5', 'CommonTree_3', 'CommonTree_5', 'CommonTree_4'];
-const MEADOW_TREES = ['CommonTree_1', 'CommonTree_2', 'CommonTree_3'];
+// Chunky, rounded low-poly trees read best with cartoon shading and outlines.
+const WILD_TREES = ['Tree_4_A_Color1', 'Tree_5_A_Color1', 'Tree_1_A_Color1', 'Tree_4_A_Color1', 'Tree_3_A_Color1', 'tree_single_A'];
+const MEADOW_TREES = ['Tree_1_A_Color1', 'tree_single_B', 'Tree_1_A_Color1'];
 
 const GRASS: MapPalette = {
-  ground: 0x3fae4c,
-  groundDark: 0x35a044,
-  groundLight: 0x4cbc58,
+  ground: 0x58c450,
+  groundDark: 0x4cb846,
+  groundLight: 0x66cf5c,
   tufts: [],
   flowers: [],
   decorTint: [1, 1, 1],
@@ -132,12 +133,11 @@ export class Territory {
       };
       const patches: Patch[] = [];
       // Meadow: short grass everywhere, clover and flowers in drifts.
-      patches.push(this.patch('Grass_Common_Short', 0.55, 'y', scatter(240, 0.4, 0), rng, 0.7, 1.3, false));
+      patches.push(this.patch('Grass_Common_Short', 0.5, 'y', scatter(110, 0.4, 0), rng, 0.7, 1.2, false));
       patches.push(this.patch('Clover_1', 0.5, 'max', scatter(26, 1, 0.6), rng, 0.8, 1.4, false));
-      patches.push(this.patch('Flower_3_Group', 0.7, 'max', scatter(22, 1, 0.6), rng, 0.8, 1.3, false));
-      patches.push(this.patch('Flower_4_Group', 0.75, 'max', scatter(16, 1, 0.6), rng, 0.8, 1.3, false));
+      patches.push(this.patch('Flower_3_Group', 0.7, 'max', scatter(12, 1, 0.6), rng, 0.8, 1.3, false));
+      patches.push(this.patch('Flower_4_Group', 0.75, 'max', scatter(8, 1, 0.6), rng, 0.8, 1.3, false));
       // Wild: tall grass and mushrooms that wither away.
-      patches.push(this.patch('Grass_Wispy_Tall', 1.1, 'y', scatter(land.id === 0 ? 40 : 90, 0.6, 0.8), rng, 0.8, 1.4, true, tint));
       patches.push(this.patch('Mushroom_Common', 0.45, 'max', scatter(10, 1.5, 1.2), rng, 0.7, 1.3, true));
       for (const p of patches) if (!p.wither) for (const im of p.meshes) im.count = 0;
 
@@ -158,10 +158,10 @@ export class Territory {
           return;
         }
       };
-      const trees = land.id === 0 ? 5 : 11;
-      for (let i = 0; i < trees; i++) addWild(WILD_TREES[Math.floor(rng() * WILD_TREES.length)], 3.4 + rng() * 2.4, 'y', 2.2);
+      const trees = land.id === 0 ? 4 : 8;
+      for (let i = 0; i < trees; i++) addWild(WILD_TREES[Math.floor(rng() * WILD_TREES.length)], 2.6 + rng() * 1.4, 'y', 2.2);
       for (let i = 0; i < 4; i++) addWild(['Rock_Medium_1', 'Rock_Medium_2', 'Rock_Medium_3'][i % 3], 0.9 + rng() * 1.1, 'max', 1.4);
-      for (let i = 0; i < 6; i++) addWild(['Fern_1', 'Plant_1_Big', 'Plant_7_Big', 'Bush_Common'][i % 4], 0.9 + rng() * 0.6, 'max', 1.2);
+      for (let i = 0; i < 5; i++) addWild('Bush_1_A_Color1', 0.9 + rng() * 0.6, 'max', 1.2);
 
       // A few meadow trees and flowering bushes pop up once the land is yours.
       const lush: THREE.Object3D[] = [];
@@ -169,7 +169,7 @@ export class Territory {
         const p = inside(2);
         if (!p || nearFence(p[0], p[1], 2.2)) continue;
         const tree = i < 3;
-        const o = this.assets.prop(tree ? MEADOW_TREES[i % MEADOW_TREES.length] : 'Bush_Common_Flowers', tree ? 3.6 + rng() * 1.4 : 1.1 + rng() * 0.4, tree ? 'y' : 'max');
+        const o = this.assets.prop(tree ? MEADOW_TREES[i % MEADOW_TREES.length] : 'Bush_1_A_Color1', tree ? 3.2 + rng() * 1.2 : 1 + rng() * 0.4, tree ? 'y' : 'max');
         o.position.set(p[0], 0, p[1]);
         o.rotation.y = rng() * 6.28;
         o.userData.s = o.scale.x;
@@ -232,16 +232,16 @@ export class Territory {
     };
     const spots: [number, number][] = [];
     const ok = (x: number, z: number, gap: number) => !spots.some(([a, b]) => Math.hypot(a - x, b - z) < gap);
-    for (let i = 0; i < 2200 && spots.length < 230; i++) {
+    for (let i = 0; i < 2600 && spots.length < 220; i++) {
       const x = (rng() - 0.5) * 112;
       const z = (rng() - 0.5) * 112;
       const d = Math.max(Math.abs(x), Math.abs(z));
-      if (d < 32 || !ok(x, z, 2.6)) continue;
+      if (d < 32 || d > 50 || !ok(x, z, 2.2)) continue;
       // Low growth only on the camera side near the edge, so nothing hides the king.
       const near = (x > 31 && x < 42) || (z > 31 && z < 42);
       spots.push([x, z]);
-      if (near) add(rng() > 0.5 ? 'Bush_Common' : 'Fern_1', 1.2 + rng() * 0.8, 'max', x, z);
-      else add(['Pine_5', 'Pine_4', 'Pine_2', 'CommonTree_5', 'CommonTree_3'][Math.floor(rng() * 5)], 4.5 + rng() * 3.5, 'y', x, z);
+      if (near) add('Bush_1_A_Color1', 1.2 + rng() * 0.8, 'max', x, z);
+      else add(WILD_TREES[Math.floor(rng() * WILD_TREES.length)], 4 + rng() * 3, 'y', x, z);
     }
     // Boulders: big on the far sides like valley walls, small on the camera side.
     for (let i = 0; i < 90; i++) {
@@ -257,7 +257,7 @@ export class Territory {
       const z = (rng() - 0.5) * 80;
       const d = Math.max(Math.abs(x), Math.abs(z));
       if (d < 31 || d > 38) continue;
-      add(['Rock_Medium_2', 'Fern_1', 'Plant_7_Big'][i % 3], 0.8 + rng() * 0.8, 'max', x, z);
+      add(['Rock_Medium_2', 'Bush_1_A_Color1', 'Rock_Medium_1'][i % 3], 0.8 + rng() * 0.8, 'max', x, z);
     }
     const baked = bakeStatic(stage, pal.decorTint);
     baked.traverse((o) => {
@@ -314,7 +314,7 @@ export class Territory {
       const dz = f.o.position.z - focus.z;
       const along = (dx + dz) * k;
       const side = Math.abs(dx - dz) * k;
-      const want = along > -0.5 && along < 11 && side < 2.6 + along * 0.12 ? 0.25 : 1;
+      const want = along > -0.5 && along < 18 && side < 3.5 + along * 0.3 ? 0.2 : 1;
       if (want === f.a) continue;
       f.a = want < f.a ? Math.max(want, f.a - dt * 4) : Math.min(want, f.a + dt * 3);
       for (const m of f.mats) {

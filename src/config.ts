@@ -157,9 +157,9 @@ export const KINGDOMS: KingdomMap[] = [
     countMul: 0.85,
     roads: TRAILS,
     palette: {
-      ground: 0x4c7448,
-      groundDark: 0x41673f,
-      groundLight: 0x5a8452,
+      ground: 0x5d8a4a,
+      groundDark: 0x547f43,
+      groundLight: 0x689755,
       tufts: [],
       flowers: [],
       decorTint: [1, 1, 1],
@@ -249,7 +249,7 @@ export const GEAR = [
   { id: 'boots', name: 'Swift Boots', desc: '+5% speed', max: 3 },
   { id: 'banner', name: 'War Banner', desc: '+8% troop damage', max: 5 },
   { id: 'treasury', name: 'Treasury', desc: '+10 starting gold', max: 5 },
-  { id: 'scepter', name: 'Scepter', desc: 'Nova charges 12% faster', max: 4 },
+  { id: 'scepter', name: 'Scepter', desc: '+10% troop health', max: 4 },
 ] as const;
 export type GearId = (typeof GEAR)[number]['id'];
 export const GEAR_COSTS = [20, 45, 80, 130, 200];

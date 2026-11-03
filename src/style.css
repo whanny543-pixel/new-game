@@ -1122,3 +1122,68 @@ h2 {
   opacity: 0.8;
   cursor: default;
 }
+
+/* ------------------------------------------------------------- Chunky cartoon HUD
+   Thick dark borders, bevelled highlights and drop shadows: toy-like, readable at a glance. */
+
+.xp,
+#combo,
+#btn-nova {
+  display: none !important;
+}
+.pill {
+  background: linear-gradient(180deg, #5a412b 0%, #3a2818 55%, #2b1d12 100%);
+  border: 3px solid #1a0f07;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 236, 200, 0.28),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.3),
+    0 3px 0 rgba(0, 0, 0, 0.35);
+  -webkit-text-stroke: 1.2px #1a0f07;
+  text-shadow: 0 2px 0 #1a0f07;
+}
+.pill.gold {
+  font-size: 26px;
+  min-width: 104px;
+  padding: 4px 14px 4px 8px;
+}
+.pill.gold .coin {
+  width: 30px;
+  height: 30px;
+  border-width: 3px;
+}
+.float-text {
+  font-size: 24px;
+  -webkit-text-stroke: 2.5px #1c0a05;
+  text-shadow: 0 3px 0 #1c0a05;
+}
+.float-text.good {
+  font-size: 28px;
+  color: #b6ff6a;
+  -webkit-text-stroke: 2.5px #123a08;
+}
+.wbar {
+  height: 9px;
+  border: 2px solid #1a0f07;
+  border-radius: 5px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+.wbar.big {
+  height: 13px;
+  width: 110px;
+  margin-left: -55px;
+}
+.wbar i {
+  background: linear-gradient(180deg, #8dff6a, #3fbf2a);
+}
+.wbar.enemy i {
+  background: linear-gradient(180deg, #ff7a6a, #d42a1e);
+}
+#banner {
+  font-size: 40px;
+  -webkit-text-stroke: 3px #1a0f07;
+  text-shadow: 0 4px 0 #1a0f07;
+}
+#hint {
+  -webkit-text-stroke: 2px #1a0f07;
+  text-shadow: 0 3px 0 #1a0f07;
+}
