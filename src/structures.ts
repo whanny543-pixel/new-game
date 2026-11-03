@@ -232,7 +232,9 @@ export const eraFor = (castleLevel: number): Era => (castleLevel >= 3 ? 'stone' 
 /** A timber lookout platform: up to six archers stand on top; level 2 mounts a ballista. */
 export function makeLookout() {
   const root = new THREE.Group();
-  const base = A.prop('structure-floor', 3.1, 'max');
+  // Tall stilts, so archers stand high over the fences.
+  const base = A.prop('structure-floor', 2.8, 'max');
+  base.scale.y *= 1.9;
   root.add(base);
   const H = new THREE.Box3().setFromObject(base).max.y;
   for (const [x, z] of [
@@ -301,7 +303,8 @@ export function makeCastle(level: number) {
       root.add(campfire(-2.2, 1.8));
       break;
     case 2:
-      add('building_tavern_blue', 5.6, 0, -0.3, Math.PI);
+      add('building_home_A_blue', 5.2, 0, -0.4, Math.PI);
+      add('building_home_B_blue', 3.2, -2.9, 1.2, Math.PI + 0.4);
       add('flag_blue', 2.6, -2.6, 2.4, 0, 'y');
       add('flag_blue', 2.6, 2.6, 2.4, 0, 'y');
       break;

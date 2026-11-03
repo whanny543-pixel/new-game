@@ -11,10 +11,10 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    uVignette: { value: 0.42 },
+    uVignette: { value: 0.22 },
     uHurt: { value: 0 },
     uFlash: { value: 0 },
-    uSat: { value: 1.14 },
+    uSat: { value: 1.28 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;

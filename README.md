@@ -24,7 +24,8 @@ You are the king. Your realm is a wild forest crawling with goblins. Lead your s
 Built with Three.js and TypeScript (Vite), and packaged for the app stores with Capacitor.
 
 **Art (all CC0, free for commercial use):**
-- KayKit by Kay Lousberg (www.kaylousberg.com): characters, castle and town buildings, nature, trees, bushes and rocks (Forest Nature pack), gold bars.
+- KayKit by Kay Lousberg (www.kaylousberg.com): characters, castle and town buildings, trees, bushes and rocks (Forest Nature pack), gold bars.
+- The rock cliffs ringing the valley and the pines around it are built in code (`src/scenery.ts`).
 - Kenney (www.kenney.nl): the timber palisade, lookout platforms, workbenches, campfires and the ballista.
 - Quaternius (quaternius.com): the goblin horde (Ultimate Monsters "Orc" and "Orc_Skull").
 
@@ -76,6 +77,7 @@ The script keeps only the animations the game uses, bundles all static models in
 | `src/realm.ts` | The map of lands, build spots, and all conquest tuning (costs, raids, troops) |
 | `src/conquest.ts` | Gameplay: king, squad, lookouts, fences and claiming, workshops, raids, economy, hints |
 | `src/territory.ts` | Meadows spreading over claimed land, the wild forest, mist |
+| `src/scenery.ts` | Flat-shaded rock cliffs and instanced pines |
 | `src/config.ts` | Player and goblin stats, kingdoms, armory |
 | `src/assets.ts` | Loads the 3D models; animated character rigs |
 | `src/horde.ts` | Baked instanced animations so hundreds of goblins stay cheap |

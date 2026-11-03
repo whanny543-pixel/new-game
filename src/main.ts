@@ -91,7 +91,7 @@ class Game {
     const mobile = matchMedia('(pointer: coarse)').matches;
     this.renderer = new Renderer(this.canvas);
     this.scene.environment = makeEnvironment(this.renderer.gl);
-    this.scene.environmentIntensity = 0.28;
+    this.scene.environmentIntensity = 0.3;
 
     this.world = new World(this.scene, mobile ? 2048 : 4096);
     this.fx = new Fx(this.scene, document.getElementById('world-ui')!);

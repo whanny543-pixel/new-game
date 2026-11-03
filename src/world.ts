@@ -24,14 +24,14 @@ export function groundTexture(pal: MapPalette, size = 512) {
   g.fillStyle = hex(pal.ground);
   g.fillRect(0, 0, size, size);
   const rng = mulberry32(7);
-  // Soft dunes of light and shade.
-  for (let i = 0; i < 40; i++) {
+  // Broad, soft patches of light and shade: a clean painted look, no grit.
+  for (let i = 0; i < 26; i++) {
     const x = rng() * size;
     const y = rng() * size;
-    const r = 30 + rng() * 90;
+    const r = 60 + rng() * 120;
     const grad = g.createRadialGradient(x, y, 0, x, y, r);
     const col = rng() > 0.5 ? pal.groundLight : pal.groundDark;
-    grad.addColorStop(0, hex(col) + '55');
+    grad.addColorStop(0, hex(col) + '40');
     grad.addColorStop(1, hex(col) + '00');
     g.fillStyle = grad;
     for (const ox of [-size, 0, size])
@@ -42,13 +42,6 @@ export function groundTexture(pal: MapPalette, size = 512) {
         g.restore();
       }
   }
-  // Grit.
-  for (let i = 0; i < 2600; i++) {
-    g.fillStyle = hex(rng() > 0.5 ? pal.groundDark : pal.groundLight);
-    g.globalAlpha = 0.25 + rng() * 0.3;
-    g.fillRect(rng() * size, rng() * size, 1 + rng() * 2, 1 + rng() * 2);
-  }
-  g.globalAlpha = 1;
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
@@ -141,9 +134,10 @@ export class World {
     private scene: THREE.Scene,
     shadowSize: number,
   ) {
-    scene.fog = new THREE.Fog(0xb8e0f0, 55, 105);
-    scene.add(new THREE.HemisphereLight(0xc9dcff, 0x8a6a6a, 0.8));
-    const sun = new THREE.DirectionalLight(0xffd29a, 2.5);
+    scene.fog = new THREE.Fog(0xb8e0f0, 62, 135);
+    // Bright, soft daylight: lots of sky fill so shadows stay gentle and colours stay clean.
+    scene.add(new THREE.HemisphereLight(0xdfeeff, 0x3d5a46, 0.7));
+    const sun = new THREE.DirectionalLight(0xfff0d8, 2.4);
     sun.castShadow = true;
     sun.shadow.mapSize.set(shadowSize, shadowSize);
     const s = sun.shadow.camera;
@@ -158,7 +152,7 @@ export class World {
 
     this.ground = new THREE.Mesh(
       new THREE.PlaneGeometry(220, 220),
-      detailize(new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0 }), 0.45, 0.9),
+      detailize(new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0 }), 0.12, 0.6),
     );
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;

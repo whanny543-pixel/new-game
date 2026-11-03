@@ -4,7 +4,8 @@ import type { Assets } from './assets';
 import type { MapPalette } from './config';
 import { detailize } from './materials';
 import { BOUNDS, LANDS, SPOTS, type Land } from './realm';
-import { bakeStatic, groundTexture, mulberry32 } from './world';
+import { groundTexture, mulberry32 } from './world';
+import { makeCliffRing, makePines } from './scenery';
 
 // Claimed land turns into a bright meadow: a grass layer masked by a small canvas that grows outward
 // from where the last fence went up, with tufts and flowers sprouting as it passes and the wild
@@ -15,12 +16,12 @@ const MASK = 272; // mask pixels (2 per unit: soft edges after linear filtering)
 const GROW = 1.6; // seconds for green to cover a land
 
 /** Trees of the wild forest (KayKit Forest Nature and Medieval Hexagon). */
-const WILD_TREES = ['Tree_1_A_Color1', 'Tree_3_A_Color1', 'Tree_4_A_Color1', 'Tree_5_A_Color1', 'Tree_7_A_Color1', 'Tree_4_A_Color1', 'Tree_5_A_Color1', 'tree_single_A', 'tree_single_B', 'trees_A_medium', 'trees_B_medium'];
+const WILD_TREES = ['Tree_4_A_Color1', 'Tree_5_A_Color1', 'Tree_4_A_Color1', 'Tree_5_A_Color1', 'Tree_1_A_Color1', 'tree_single_A'];
 
 const GRASS: MapPalette = {
-  ground: 0x6fb446,
-  groundDark: 0x579a35,
-  groundLight: 0x8ccc55,
+  ground: 0x229a48,
+  groundDark: 0x1c8c40,
+  groundLight: 0x2eaa54,
   tufts: [],
   flowers: [],
   decorTint: [1, 1, 1],
@@ -79,8 +80,8 @@ export class Territory {
     grassTex.repeat.set(EXTENT / 9, EXTENT / 9);
     const mat = detailize(
       new THREE.MeshStandardMaterial({ map: grassTex, alphaMap: this.mask, transparent: true, depthWrite: false, roughness: 0.95 }),
-      0.4,
-      0.9,
+      0.1,
+      0.6,
     );
     this.grass = new THREE.Mesh(new THREE.PlaneGeometry(EXTENT, EXTENT), mat);
     this.grass.rotation.x = -Math.PI / 2;
@@ -111,7 +112,8 @@ export class Territory {
     };
     const dt = pal.decorTint;
     // The untamed forest is darker and gloomier than the claimed meadows.
-    const wildTint: [number, number, number] = [dt[0] * 0.72, dt[1] * 0.78, dt[2] * 0.72];
+    // Dark teal pines of the untamed forest.
+    const wildTint: [number, number, number] = [dt[0] * 0.42, dt[1] * 0.68, dt[2] * 0.66];
     const clear = (x: number, z: number, pad: number) => {
       for (const c of keepClear) if (Math.hypot(x - c.x, z - c.z) < c.r + pad) return false;
       for (const sp of SPOTS) if (Math.hypot(x - sp.x, z - sp.z) < 3.4 + pad) return false;
@@ -139,7 +141,7 @@ export class Territory {
     const flowerGeo = new THREE.IcosahedronGeometry(0.1, 0).translate(0, 0.3, 0);
     const tuftMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 });
     const flowerMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 });
-    const tuftCols = [0x5f9c3a, 0x76b545, 0x8fcb52, 0x4f8a30];
+    const tuftCols = [0x2c9a4e, 0x3cae5c, 0x4fc06a, 0x258a44];
     const flowerCols = [0xffffff, 0xffe066, 0xff8fb1, 0xb69cff, 0xff6b5b];
 
     for (const land of LANDS) {
@@ -172,7 +174,7 @@ export class Territory {
       const wild: THREE.Object3D[] = [];
       const lush: THREE.Object3D[] = [];
       // Thick, dark wild forest: cleared (it shrinks away) when the land is claimed.
-      for (let i = 0; i < (land.id === 0 ? 8 : 18); i++) {
+      for (let i = 0; i < (land.id === 0 ? 7 : 14); i++) {
         for (let tries = 0; tries < 20; tries++) {
           const x = land.x0 + 1.5 + rng() * 17;
           const z = land.z0 + 1.5 + rng() * 17;
@@ -224,44 +226,34 @@ export class Territory {
     this.redraw();
   }
 
-  /** A deep forest all around the realm, hills beyond, and drifting mist at the edge. */
+  /** Pines all around the lands, then chunky rock cliffs walling in the valley, then mist. */
   private outskirts(pal: MapPalette, rng: () => number) {
-    const stage = new THREE.Group();
-    const inLand = (x: number, z: number) => Math.abs(x) < 31.5 && Math.abs(z) < 31.5;
-    const scatter = (names: string[], n: number, size: () => number, axis: 'y' | 'max', minD: number, maxD: number) => {
-      for (let i = 0; i < n; i++) {
-        for (let tries = 0; tries < 20; tries++) {
-          const x = (rng() - 0.5) * maxD * 2;
-          const z = (rng() - 0.5) * maxD * 2;
-          const d = Math.max(Math.abs(x), Math.abs(z));
-          if (d < minD || inLand(x, z)) continue;
-          // The camera looks in from the +x/+z side: keep a gap there so trees never hide the king.
-          if ((x > 31 && x < 41) || (z > 31 && z < 41)) continue;
-          const o = this.assets.prop(names[Math.floor(rng() * names.length)], size(), axis);
-          o.position.set(x, 0, z);
-          o.rotation.y = rng() * 6.28;
-          stage.add(o);
-          break;
-        }
-      }
-    };
-    scatter(WILD_TREES, 340, () => 3 + rng() * 3, 'y', 31.5, 58);
-    scatter(['trees_A_large', 'trees_B_large'], 60, () => 4 + rng() * 2, 'y', 36, 60);
-    scatter(['Bush_1_A_Color1'], 90, () => 1 + rng() * 0.8, 'max', 31.5, 52);
-    scatter(['Rock_1_A_Color1', 'Rock_3_C_Color1'], 30, () => 0.8 + rng() * 1.4, 'max', 31.5, 52);
-    scatter(['mountain_A_grass_trees', 'mountain_B_grass_trees', 'mountain_C_grass_trees', 'hills_A_trees', 'hills_B_trees'], 26, () => 9 + rng() * 6, 'max', 52, 66);
     const dt = pal.decorTint;
-    this.root.add(bakeStatic(stage, [dt[0] * 0.8, dt[1] * 0.85, dt[2] * 0.8]));
+    const spots: [number, number, number][] = [];
+    for (let i = 0; i < 900 && spots.length < 260; i++) {
+      const x = (rng() - 0.5) * 120;
+      const z = (rng() - 0.5) * 120;
+      const d = Math.max(Math.abs(x), Math.abs(z));
+      if (d < 31.5 || d > 58) continue;
+      // Low on the camera side so they never hide the king.
+      const near = x > 31 || z > 31;
+      const h = near ? 1.6 + rng() * 1.4 : 2.4 + rng() * 2.6;
+      if (spots.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 1.3)) continue;
+      spots.push([x, z, h]);
+    }
+    this.root.add(makePines(spots, [dt[0], dt[1], dt[2]]));
+    const shade = (c: number) => new THREE.Color(c).multiply(new THREE.Color(dt[0], dt[1], dt[2])).getHex();
+    this.root.add(makeCliffRing(rng, 39, 62, { top: shade(0xcfcde0), side: shade(0x9a9ab6), low: shade(0x6a6a88) }));
 
     // Fog banks: big soft clouds sitting on the ground beyond the edge of the realm.
     const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.92, emissive: 0xffffff, emissiveIntensity: 0.35 });
     for (let i = 0; i < 46; i++) {
       const side = i % 4;
       const t = (rng() - 0.5) * 2 * (BOUNDS + 16);
-      const out = BOUNDS + 9 + rng() * 6;
+      const out = BOUNDS + 22 + rng() * 10;
       const x = side === 0 ? t : side === 1 ? t : side === 2 ? out : -out;
       const z = side === 0 ? out : side === 1 ? -out : t;
-      const c = this.assets.prop(rng() > 0.5 ? 'cloud_big' : 'cloud_small', 9 + rng() * 7, 'max');
+      const c = this.assets.prop(rng() > 0.5 ? 'cloud_big' : 'cloud_small', 12 + rng() * 9, 'max');
       c.traverse((o) => {
         const m = o as THREE.Mesh;
         if (m.isMesh) {

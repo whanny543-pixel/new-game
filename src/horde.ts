@@ -110,9 +110,17 @@ export class Horde {
         if (!material && (o as THREE.Mesh).isMesh) material = ((o as THREE.Mesh).material as THREE.Material).clone();
       });
       const mat = material as unknown as THREE.MeshStandardMaterial;
-      mat.roughness = 0.6;
-      // The warlord gets a darker, blood-red tint so he reads as a boss.
-      if (kind === 'troll') mat.color.setRGB(1.15, 0.62, 0.55);
+      mat.roughness = 0.55;
+      // A bold red horde that reads instantly against green grass; the ogre warlord is a big
+      // pinkish brute (his texture kept, warmed up).
+      if (kind === 'troll') {
+        mat.color.setRGB(1.35, 0.78, 0.78);
+      } else {
+        mat.map = null;
+        mat.color.set(kind === 'runner' ? 0xb0242c : 0xe0352f);
+        mat.emissive.set(0x3a0606);
+        mat.flatShading = false;
+      }
       const anims = {} as Record<HordeAnim, Baked>;
       for (const anim of Object.keys(FRAMES) as HordeAnim[]) {
         const clipName = anim === 'move' ? s.move : CLIPS[anim];
