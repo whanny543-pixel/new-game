@@ -2,37 +2,30 @@
 
 A portrait, one-thumb medieval kingdom-defense game for iOS and Android.
 
-You are the king. Goblin warbands march down winding roads toward your castle. You fight on the front line (your sword fires golden bolts), and gold from fallen goblins stacks up on your back. Spend it by standing on build plots.
+You are the king. Your realm is a dusty wasteland crawling with goblins. Lead your squad across it, fence in one land after another (each one turns green the moment its fence closes) and hold off ever-bigger goblin raids.
+
+**How it plays**
+- **Drag** anywhere to move. The king and his squad fight on their own.
+- Goblins drop gold, and coin piles lie around the wasteland. Gold stacks up into a tower on the king's back. **Stand on a plot** and the gold flies off the stack into it.
+- **Archery Range / Barracks:** pay the green recruit pad and a band of archers or knights runs out and joins the ring of troops marching around the king.
+- **Lookouts:** build a timber platform, then stand on its pad and your squad's archers climb up, one by one. Upgraded lookouts get a ballista.
+- **Fences:** each land is a square bordered by fence pieces. Build every piece around a land and it's **claimed**: grass and flowers spread out across it, its buildings unlock, houses and villagers move in, and a treasure chest pops up. Fences between two claimed lands sink away; the outer ones are your border.
+- Goblins come out of the fog from any side and smash their way through your fences toward the keep. Broken fences can be rebuilt for half price. Every few raids an **ogre warlord** joins in.
+- **Forge:** makes armour kits. Walk past to pick them up and they go to your troops automatically, raising them from Recruit to Iron, Steel and Royal (blue, then gold).
+- **Gold Mines** pile up gold bars to scoop up. The **Castle** grows from a log camp to a citadel as you claim lands; from the Stone Keep on, fences and workshops are rebuilt in stone.
+- Claim all seven lands, then beat the Warlord's Host to win the kingdom.
 
 **Campaign**
-- A world map of four kingdoms (Greenvale, Amberwood, Ashmoor, Frostpeak). Each has its own roads, look and difficulty. Survive all its waves to free it and unlock the next.
-- Victories and survived waves earn **crowns**. Spend them in the **King's Armory** on permanent upgrades: Royal Sword, Royal Armour, Swift Boots, War Banner, Treasury and Scepter.
-
-**Defense**
-- **Watchtowers** beside the road need archers. Recruit them at the **Archery Range** and lead them to a free tower. Upgrades add a slot, then a catapult.
-- **Guard posts** on the road hold knights recruited at the **Barracks**. **Barricades** stall the horde.
-- The **Forge** makes swords and the **Bowyer** makes crossbows. Carry them to your troops for better weapons.
-- An Orc Warlord leads every 4th wave and drops a treasure chest.
-
-**The kingdom wall**
-- Goblins march down the roads, but near your kingdom they leave them and storm across open ground. From wave 3, whole warbands come straight over the fields from any side.
-- Build the wall ring around your kingdom one section at a time (each section has a lookout post for two archers, and gates where roads cross). Any section you haven't built, or that gets smashed, is a way in.
-
-**The kingdom grows with the castle**
-- The castle starts as a few logs, a tent and a campfire, then becomes a Wooden Hall, Timber Fort, Stone Keep, Castle and finally a Citadel.
-- Everything matches its era: until the Stone Keep, workshops are tents, workbenches and timber platforms; after it they're rebuilt in stone. Every wall section is rebuilt too: wooden palisade → stone → castle walls → citadel walls with towers.
-- **Gold Mine:** miners dig up gold bars that pile up outside the mine. Walk past to scoop them into your stack.
-- New houses, a well, a windmill and a church appear as the town grows, and more townsfolk move in.
-- **Lumber Camp:** woodcutters chop trees, which regrow. **Quarry:** miners bring stone. **Farm:** farmers harvest wheat for **food**, which recruits need.
-- **Builders** repair wall sections and barricades.
+- A world map of four kingdoms (Greenvale, Amberwood, Ashmoor, Frostpeak), each harder and with its own colours.
+- Raids survived and kingdoms won earn **crowns** for the **King's Armory**: Royal Sword, Royal Armour, Swift Boots, War Banner, Treasury and Scepter.
 
 **The king's powers:** every kill gives XP, and each level offers three perk cards. Kills also charge the **Arcane Nova** button, which blasts the horde back.
 
 Built with Three.js and TypeScript (Vite), and packaged for the app stores with Capacitor.
 
 **Art (all CC0, free for commercial use):**
-- KayKit by Kay Lousberg (www.kaylousberg.com): characters, castle and town buildings, nature, gold bars.
-- Kenney (www.kenney.nl): wooden-era camp pieces (lookout platforms, workbenches, campfires) and the ballista.
+- KayKit by Kay Lousberg (www.kaylousberg.com): characters, castle and town buildings, nature, dead trees and rocks (Forest Nature pack), gold bars.
+- Kenney (www.kenney.nl): the timber palisade, lookout platforms, workbenches, campfires and the ballista.
 - Quaternius (quaternius.com): the goblin horde (Ultimate Monsters "Orc" and "Orc_Skull").
 
 Licence files are in `src/assets/models`. The king is the KayKit knight with a procedural crown and royal cape. Sound effects are synthesized in code.
@@ -70,7 +63,7 @@ git clone --depth 1 https://github.com/KayKit-Game-Assets/KayKit-Medieval-Hexago
 git clone --depth 1 https://github.com/KayKit-Game-Assets/KayKit-Dungeon-Remastered-1.0
 git clone --depth 1 --filter=blob:none --sparse https://github.com/series-ai/jam-ready-assets
 #   (sparse-checkout kenney-survival-kit, kenney-castle-kit, quaternius-ultimate-monsters,
-#    kaykit-resource-bits; their models are in Git LFS)
+#    kaykit-resource-bits, kaykit-forest-nature; their models are in Git LFS)
 node tools/build-assets.mjs <folder with the KayKit clones> <jam-ready-assets folder>
 ```
 
@@ -80,20 +73,20 @@ The script keeps only the animations the game uses, bundles all static models in
 
 | File | What it does |
 | --- | --- |
-| `src/config.ts` | All balancing: costs, damage, weapon tiers, waves, roads, plot layout |
-| `src/run.ts` | Gameplay: hero, horde, defenders, workshops, waves, economy, hints |
-| `src/road.ts` | Road curves the horde walks along |
-| `src/assets.ts` | Loads the KayKit models; animated character rigs |
-| `src/horde.ts` | Goblin re-skin and baked instanced animations so hundreds of enemies stay cheap |
-| `src/structures.ts` | Towers, castle, workshops, hero and troops built from the models |
-| `src/models.ts` | Shared materials, small procedural bits (coins, particles, lanterns) |
-| `src/world.ts` | Meadow terrain, roads, scenery (merged into chunks), lighting |
+| `src/realm.ts` | The map of lands, build spots, and all conquest tuning (costs, raids, troops) |
+| `src/conquest.ts` | Gameplay: king, squad, lookouts, fences and claiming, workshops, raids, economy, hints |
+| `src/territory.ts` | Green spreading over claimed land, wasteland scenery, fog banks |
+| `src/config.ts` | Player and goblin stats, kingdoms, armory |
+| `src/assets.ts` | Loads the 3D models; animated character rigs |
+| `src/horde.ts` | Baked instanced animations so hundreds of goblins stay cheap |
+| `src/structures.ts` | Castle, workshops, lookouts, fences, king and troops built from the models |
+| `src/models.ts` | Shared materials and small procedural bits (coins, mesas) |
+| `src/world.ts`, `src/road.ts` | Ground, winding trails, lighting, static-mesh merging |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
 | `src/perks.ts` | Level-up perk deck |
-| `src/kingdom.ts` | Wood/stone/food stockpile, woodcutters, miners, farmers, builders, townsfolk, houses |
 | `src/render.ts` | Post-processing: bloom, colour grade, vignette, adaptive quality |
 | `src/materials.ts` | PBR materials with world-space detail texture, baked environment light |
-| `src/particles.ts` | GPU point-sprite particles and effect presets |
+| `src/particles.ts`, `src/fx.ts` | GPU particles, flying coins, damage numbers |
 | `src/hud.ts`, `src/style.css` | HUD, menus, health bars, level-up cards |
 | `src/input.ts` | Floating joystick and keyboard |
 | `src/audio.ts` | Synthesized sound effects |

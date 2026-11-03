@@ -23,7 +23,7 @@ export class Hud {
   private bannerEl = document.getElementById('banner')!;
   private hintEl = document.getElementById('hint')!;
   private bars = new Map<HTMLElement, Pinned>();
-  private last = { gold: -1, wave: -1, waveP: -1, keep: -1, hint: '' };
+  private last = { gold: -1, label: '', waveP: -1, keep: -1, hint: '' };
   private bannerTimer = 0;
   private goldShown = 0;
   private goldTarget = 0;
@@ -127,10 +127,11 @@ export class Hud {
     this.bumpTimer = 0.08;
   }
 
-  setWave(n: number, progress: number, of = 0) {
-    if (n !== this.last.wave) {
-      this.last.wave = n;
-      this.waveLabel.textContent = of ? `Wave ${n}/${of}` : `Wave ${n}`;
+  /** Top-left pill: a label (lands held) and a bar (time until the next raid). */
+  setWave(label: string, progress: number) {
+    if (label !== this.last.label) {
+      this.last.label = label;
+      this.waveLabel.textContent = label;
     }
     const p = Math.round(progress * 100);
     if (p !== this.last.waveP) {
@@ -235,7 +236,7 @@ export class Hud {
 
   reset() {
     for (const el of [...this.bars.keys()]) this.removeBar(el);
-    this.last = { gold: -1, wave: -1, waveP: -1, keep: -1, hint: '' };
+    this.last = { gold: -1, label: '', waveP: -1, keep: -1, hint: '' };
     this.goldShown = this.goldTarget = 0;
     this.res = { wood: -1, stone: -1, food: -1, nova: -1 };
     this.setResources(0, 0, 0);

@@ -7,7 +7,7 @@ import { Input } from './input';
 import { makeEnvironment } from './materials';
 import { rollPerks } from './perks';
 import { Renderer } from './render';
-import { MAX_ENEMIES, Run } from './run';
+import { MAX_ENEMIES, Conquest } from './conquest';
 import { Assets } from './assets';
 import { Horde } from './horde';
 import { useAssets } from './structures';
@@ -17,6 +17,11 @@ import type { Assets as AssetsT } from './assets';
 import './style.css';
 
 type State = 'menu' | 'map' | 'playing' | 'paused' | 'levelup' | 'over';
+
+/** Camera: looks across the realm diagonally, three-quarter view, following the king. */
+const CAM_YAW = Math.PI / 4;
+const CAM_PITCH = 0.92;
+const CAM_DIST = 33;
 
 const SAVE_KEY = 'hearthguard.campaign.v1';
 const MUTE_KEY = 'hearthguard.muted';
@@ -58,7 +63,7 @@ class Game {
   private hud = new Hud();
   private sfx = new Sfx();
   private input: Input;
-  private run: Run | null = null;
+  private run: Conquest | null = null;
   private horde: Horde | null = null;
   private state: State = 'menu';
   private clock = new THREE.Clock();
@@ -218,8 +223,8 @@ class Game {
     card.innerHTML = `
       <h3>${k.name}</h3>
       <p>${k.blurb}</p>
-      <p class="facts">Survive <b>${k.waves}</b> waves · Goblin strength <b>×${k.hpMul.toFixed(2)}</b>${best ? ` · Best: wave ${best}` : ''}${this.save.won[k.id] ? ' · <b>Conquered</b>' : ''}</p>
-      <button id="btn-defend" class="cta">Defend ${k.name}</button>`;
+      <p class="facts">Claim <b>7</b> lands · Goblin strength <b>×${k.hpMul.toFixed(2)}</b>${best ? ` · Best: ${best} raids` : ''}${this.save.won[k.id] ? ' · <b>Conquered</b>' : ''}</p>
+      <button id="btn-defend" class="cta">Reclaim ${k.name}</button>`;
     document.querySelectorAll('.map-node').forEach((n, j) => n.classList.toggle('selected', j === i));
     document.getElementById('btn-defend')!.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -263,7 +268,7 @@ class Game {
     this.fx.clear();
     const map = KINGDOMS[kingdom];
     this.world.setMap(map);
-    this.run = new Run(this.scene, this.world, this.fx, this.sfx, this.hud, {
+    this.run = new Conquest(this.scene, this.world, this.fx, this.sfx, this.hud, {
       onGameOver: (wave) => this.gameOver(wave),
       onVictory: () => this.victory(),
       haptic: (strong) => {
@@ -271,8 +276,7 @@ class Game {
       },
       hurt: (a) => (this.renderer.hurt = Math.max(this.renderer.hurt, a)),
       flash: (a) => (this.renderer.flash = Math.max(this.renderer.flash, a)),
-    }, this.horde!, map, this.save.gear);
-    this.world.decorate(this.run.reservedSpots(), this.assets!);
+    }, this.horde!, map, this.assets!, this.save.gear);
     this.camFocus.copy(this.run.heroPos);
   }
 
@@ -318,7 +322,7 @@ class Game {
       this.input.release();
       const earned = this.payCrowns(wave - 1);
       this.persist();
-      document.getElementById('over-wave')!.textContent = `You held ${KINGDOMS[this.kingdomIndex].name} until wave ${wave}`;
+      document.getElementById('over-wave')!.textContent = `You held ${KINGDOMS[this.kingdomIndex].name} through ${Math.max(0, wave - 1)} goblin raids`;
       document.getElementById('over-best')!.textContent = `+${earned} crowns · spend them in the Armory`;
       document.getElementById('over')!.classList.remove('hidden');
     }, 1200);
@@ -382,8 +386,8 @@ class Game {
     if (!run) {
       // Still loading: keep the scene alive behind the title card.
       this.menuT += rawDt;
-      this.camera.position.set(Math.sin(this.menuT * 0.2) * 4, 34, 12);
-      this.camera.lookAt(0, 0, -4);
+      this.camera.position.set(Math.sin(this.menuT * 0.2) * 4 + 18, 30, 18);
+      this.camera.lookAt(0, 0, 0);
       this.renderer.render(this.scene, this.camera, rawDt, rawDt);
       return;
     }
@@ -397,7 +401,13 @@ class Game {
     }
 
     if (this.state === 'playing') {
-      run.update(dt, this.input.move);
+      // Screen directions → world: the camera looks across the realm at 45°.
+      const m = this.input.move;
+      const c = Math.cos(CAM_YAW);
+      const s = Math.sin(CAM_YAW);
+      this.moveWorld.x = m.x * c + m.y * s;
+      this.moveWorld.y = -m.x * s + m.y * c;
+      run.update(dt, this.moveWorld);
       if (run.pendingLevelUps > 0 && run.hitstop <= 0 && !run.over) this.offerPerk();
     } else if (this.state === 'menu') {
       this.menuT += dt;
@@ -411,16 +421,20 @@ class Game {
     const zoom = this.camZoom * (1 - this.fx.punch * 0.07);
     const follow =
       this.state === 'menu'
-        ? this.look.set(Math.sin(this.menuT * 0.2) * 4, 0, -4 + Math.cos(this.menuT * 0.15) * 3)
+        ? this.look.set(Math.sin(this.menuT * 0.2) * 6, 0, Math.cos(this.menuT * 0.15) * 5)
         : this.look.copy(run.heroPos).addScaledVector(run.heroVel, 0.28);
     this.camFocus.lerp(follow, Math.min(1, dt * 4.5));
     const shake = this.fx.shake;
+    // Pull back a little as the army grows.
+    const army = this.state === 'playing' ? Math.min(1, run.units.length / 30) : 0;
+    this.camArmy += (army - this.camArmy) * Math.min(1, dt);
+    const dist = (CAM_DIST + this.camArmy * 3) * zoom;
     this.camera.position.set(
-      this.camFocus.x + (Math.random() - 0.5) * shake * 0.6,
-      29 * zoom,
-      this.camFocus.z + 14.5 * zoom + (Math.random() - 0.5) * shake * 0.6,
+      this.camFocus.x + Math.sin(CAM_YAW) * dist * Math.cos(CAM_PITCH) + (Math.random() - 0.5) * shake * 0.6,
+      dist * Math.sin(CAM_PITCH),
+      this.camFocus.z + Math.cos(CAM_YAW) * dist * Math.cos(CAM_PITCH) + (Math.random() - 0.5) * shake * 0.6,
     );
-    this.camera.lookAt(this.camFocus.x, 0, this.camFocus.z - 1.2);
+    this.camera.lookAt(this.camFocus.x, 0, this.camFocus.z);
     if (this.debugCam) {
       this.camera.position.copy(this.debugCam.pos);
       this.camera.lookAt(this.debugCam.look);
@@ -435,6 +449,8 @@ class Game {
   }
 
   private look = new THREE.Vector3();
+  private moveWorld = { x: 0, y: 0 };
+  private camArmy = 0;
   /** Playtest hook: pin the camera somewhere specific. */
   debugCam: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
 }

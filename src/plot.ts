@@ -2,36 +2,32 @@ import * as THREE from 'three';
 import type { PlotDef, PlotKind } from './config';
 
 // A build plot: a flat marker on the ground showing what it builds and how much gold is left.
+// Stand on it and gold flies off the king's stack into it.
 
 const SIZE = 2.3;
 const PX = 256;
 
 const LABEL: Record<PlotKind, string> = {
-  tower: 'Watchtower',
-  post: 'Guard Post',
-  barricade: 'Barricade',
+  tower: 'Lookout',
   range: 'Archery Range',
   barracks: 'Barracks',
   forge: 'Forge',
-  bowyer: 'Bowyer',
-  recruitArcher: 'Recruit Archer',
-  recruitKnight: 'Recruit Knight',
-  camp: 'Lumber Camp',
-  quarry: 'Quarry',
-  farm: 'Farm',
+  recruitArcher: 'Archers',
+  recruitKnight: 'Knights',
   goldmine: 'Gold Mine',
-  wall: 'Wall',
+  wall: 'Fence',
   castle: 'Castle',
 };
 
-/** Some plots name each level (gates: Wooden → Stone → Castle). */
+/** Some plots name each level (the castle names the level you're building next). */
 const LEVEL_NAMES: Partial<Record<PlotKind, string[]>> = {
-  // The castle plot names the level you're building next.
   castle: ['Wooden Hall', 'Timber Fort', 'Stone Keep', 'Castle', 'Citadel'],
 };
 
-/** Repeating plots (recruiting) don't show a level number. */
-const REPEATING = new Set<PlotKind>(['recruitArcher', 'recruitKnight', 'barricade']);
+/** Repeating plots don't show a level number. */
+const REPEATING = new Set<PlotKind>(['recruitArcher', 'recruitKnight', 'wall']);
+/** Recruit plots glow green, like the troops waiting to join. */
+const RECRUIT = new Set<PlotKind>(['recruitArcher', 'recruitKnight']);
 
 export class Plot {
   readonly group = new THREE.Group();
@@ -48,8 +44,6 @@ export class Plot {
   private plane: THREE.Mesh;
   private drawnKey = '';
   private pulse = 0;
-  /** Kingdom stockpile, so missing wood/stone can be shown in red. */
-  private stock = { wood: 0, stone: 0, food: 0 };
 
   constructor(readonly def: PlotDef) {
     this.canvas.width = this.canvas.height = PX;
@@ -82,25 +76,6 @@ export class Plot {
   get maxed() {
     return this.level >= this.def.costs.length;
   }
-  get woodCost() {
-    return this.def.wood?.[this.level] ?? 0;
-  }
-  get stoneCost() {
-    return this.def.stone?.[this.level] ?? 0;
-  }
-  get foodCost() {
-    return this.def.food?.[this.level] ?? 0;
-  }
-  /** Whether the kingdom stockpile covers this level's wood and stone. */
-  get stocked() {
-    return this.stock.wood >= this.woodCost && this.stock.stone >= this.stoneCost && this.stock.food >= this.foodCost;
-  }
-
-  setStock(wood: number, stone: number, food: number) {
-    this.stock.wood = wood;
-    this.stock.stone = stone;
-    this.stock.food = food;
-  }
 
   show(on: boolean) {
     if (on === this.shown) return;
@@ -125,19 +100,19 @@ export class Plot {
   }
 
   private redraw(active: boolean) {
-    const needs = this.woodCost > 0 || this.stoneCost > 0 || this.foodCost > 0;
-    const key = `${this.cost}|${this.level}|${this.paid}|${active}|${needs ? `${this.stock.wood >= this.woodCost}${this.stock.stone >= this.stoneCost}${this.stock.food >= this.foodCost}` : ''}`;
+    const key = `${this.cost}|${this.level}|${this.paid}|${active}`;
     if (key === this.drawnKey) return;
     this.drawnKey = key;
     const g = this.ctx;
     const W = PX;
+    const recruit = RECRUIT.has(this.def.kind);
     g.clearRect(0, 0, W, W);
 
     // Body
     const r = 34;
     const inset = 10;
     roundRect(g, inset, inset, W - inset * 2, W - inset * 2, r);
-    g.fillStyle = active ? 'rgba(40,26,12,0.62)' : 'rgba(40,26,12,0.45)';
+    g.fillStyle = recruit ? (active ? 'rgba(40,170,60,0.75)' : 'rgba(40,150,60,0.6)') : active ? 'rgba(40,26,12,0.62)' : 'rgba(40,26,12,0.45)';
     g.fill();
 
     // Progress fill (bottom-up)
@@ -147,7 +122,7 @@ export class Plot {
       roundRect(g, inset, inset, W - inset * 2, W - inset * 2, r);
       g.clip();
       const h = (W - inset * 2) * frac;
-      g.fillStyle = 'rgba(255,201,40,0.55)';
+      g.fillStyle = recruit ? 'rgba(140,255,120,0.6)' : 'rgba(255,201,40,0.55)';
       g.fillRect(inset, W - inset - h, W - inset * 2, h);
       g.restore();
     }
@@ -162,8 +137,7 @@ export class Plot {
 
     // Icon
     g.save();
-    g.translate(W / 2, needs ? 76 : 96);
-    if (needs) g.scale(0.8, 0.8);
+    g.translate(W / 2, 96);
     drawIcon(g, this.def.kind);
     g.restore();
 
@@ -175,11 +149,10 @@ export class Plot {
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     g.fillStyle = '#fff4d6';
-    const ly = needs ? 130 : 158;
-    g.fillText(label, W / 2, ly);
-    const cy = needs ? 170 : 204;
+    g.fillText(label, W / 2, 158);
 
     // Cost: coin + number
+    const cy = 204;
     const txt = String(this.remaining);
     g.font = 'bold 48px "Lilita One", "Trebuchet MS", sans-serif';
     const tw = g.measureText(txt).width;
@@ -198,26 +171,6 @@ export class Plot {
     g.strokeText(txt, cx + 24, cy + 2);
     g.fillText(txt, cx + 24, cy + 2);
 
-    // Wood / stone row: green when the stockpile covers it, red when it doesn't.
-    if (needs) {
-      const items: [string, number, boolean][] = [];
-      if (this.woodCost) items.push(['wood', this.woodCost, this.stock.wood >= this.woodCost]);
-      if (this.stoneCost) items.push(['stone', this.stoneCost, this.stock.stone >= this.stoneCost]);
-      if (this.foodCost) items.push(['food', this.foodCost, this.stock.food >= this.foodCost]);
-      g.font = 'bold 32px "Lilita One", "Trebuchet MS", sans-serif';
-      const widths = items.map(([, n]) => 34 + g.measureText(String(n)).width);
-      let x = W / 2 - (widths.reduce((a, b) => a + b, 0) + (items.length - 1) * 16) / 2;
-      items.forEach(([kind, n, ok], i) => {
-        drawResIcon(g, kind as 'wood' | 'stone' | 'food', x + 12, 218);
-        g.fillStyle = ok ? '#b8ff9a' : '#ff7a6b';
-        g.lineWidth = 6;
-        g.strokeStyle = '#2a1608';
-        g.strokeText(String(n), x + 28, 220);
-        g.fillText(String(n), x + 28, 220);
-        x += widths[i] + 16;
-      });
-    }
-
     this.tex.needsUpdate = true;
   }
 
@@ -226,57 +179,6 @@ export class Plot {
     (this.plane.material as THREE.Material).dispose();
     this.plane.geometry.dispose();
   }
-}
-
-/** Small log / stone icons for resource costs. */
-export function drawResIcon(g: CanvasRenderingContext2D, kind: 'wood' | 'stone' | 'food', x: number, y: number) {
-  g.save();
-  g.translate(x, y);
-  g.lineWidth = 3;
-  g.strokeStyle = '#2a1608';
-  if (kind === 'food') {
-    // Wheat sheaf
-    g.fillStyle = '#f0c24a';
-    for (const a of [-0.45, 0, 0.45]) {
-      g.save();
-      g.rotate(a);
-      g.beginPath();
-      g.ellipse(0, -6, 4, 8, 0, 0, Math.PI * 2);
-      g.fill();
-      g.stroke();
-      g.restore();
-    }
-    g.fillStyle = '#b8862a';
-    g.fillRect(-2, 0, 4, 12);
-  } else if (kind === 'wood') {
-    g.fillStyle = '#b5773e';
-    g.beginPath();
-    g.ellipse(0, 0, 13, 9, -0.4, 0, Math.PI * 2);
-    g.fill();
-    g.stroke();
-    g.fillStyle = '#e8c08a';
-    g.beginPath();
-    g.ellipse(6, -3, 5, 4, -0.4, 0, Math.PI * 2);
-    g.fill();
-  } else {
-    g.fillStyle = '#b9b6ae';
-    g.beginPath();
-    g.moveTo(-12, 6);
-    g.lineTo(-8, -8);
-    g.lineTo(6, -11);
-    g.lineTo(13, 2);
-    g.lineTo(5, 10);
-    g.closePath();
-    g.fill();
-    g.stroke();
-  }
-  g.restore();
-}
-
-function plus(g: CanvasRenderingContext2D) {
-  g.moveTo(30, -44);
-  g.rect(30, -44, 10, 30);
-  g.rect(20, -34, 30, 10);
 }
 
 function roman(n: number) {
@@ -293,6 +195,18 @@ function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number,
   g.closePath();
 }
 
+/** A little soldier silhouette (head + body) for the recruit plots. */
+function soldier(g: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  g.moveTo(x + 9 * s, y - 26 * s);
+  g.arc(x, y - 26 * s, 9 * s, 0, Math.PI * 2);
+  g.moveTo(x - 13 * s, y + 18 * s);
+  g.lineTo(x - 13 * s, y - 6 * s);
+  g.quadraticCurveTo(x - 13 * s, y - 15 * s, x, y - 15 * s);
+  g.quadraticCurveTo(x + 13 * s, y - 15 * s, x + 13 * s, y - 6 * s);
+  g.lineTo(x + 13 * s, y + 18 * s);
+  g.closePath();
+}
+
 /** Simple bold silhouettes, drawn around (0,0), roughly 80px tall. */
 function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
   g.fillStyle = '#fff4d6';
@@ -302,39 +216,16 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
   g.beginPath();
   switch (kind) {
     case 'tower':
-      // Stilt tower
-      g.rect(-30, -40, 60, 16);
-      g.moveTo(-24, -24);
-      g.lineTo(-30, 42);
-      g.lineTo(-20, 42);
-      g.lineTo(-14, -24);
-      g.closePath();
-      g.moveTo(24, -24);
-      g.lineTo(30, 42);
-      g.lineTo(20, 42);
-      g.lineTo(14, -24);
-      g.closePath();
-      g.rect(-22, 4, 44, 8);
-      break;
-    case 'post':
-      // Banner on a pole
-      g.rect(-24, -42, 8, 84);
-      g.moveTo(-16, -40);
-      g.lineTo(30, -40);
-      g.lineTo(30, 0);
-      g.lineTo(7, -10);
-      g.lineTo(-16, 0);
-      g.closePath();
-      break;
-    case 'barricade':
-      for (let i = 0; i < 4; i++) {
-        const x = -36 + i * 22;
-        g.moveTo(x, 38);
-        g.lineTo(x + 18, -30);
-        g.lineTo(x + 26, -26);
-        g.lineTo(x + 10, 40);
+      // Stilt platform
+      g.rect(-34, -36, 68, 14);
+      for (const sx of [-1, 1]) {
+        g.moveTo(sx * 28, -22);
+        g.lineTo(sx * 34, 40);
+        g.lineTo(sx * 24, 40);
+        g.lineTo(sx * 18, -22);
         g.closePath();
       }
+      g.rect(-24, 6, 48, 8);
       break;
     case 'range':
       g.arc(0, 0, 38, 0, Math.PI * 2);
@@ -344,7 +235,6 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       g.arc(0, 0, 8, 0, Math.PI * 2);
       break;
     case 'barracks':
-    case 'recruitKnight':
       // Helmet
       g.moveTo(-30, 30);
       g.lineTo(-30, -6);
@@ -356,17 +246,15 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       g.lineTo(-6, 0);
       g.lineTo(-6, 30);
       g.closePath();
-      if (kind === 'recruitKnight') plus(g);
       break;
     case 'recruitArcher':
-      // Bow with arrow
-      g.moveTo(-8, -40);
-      g.quadraticCurveTo(44, 0, -8, 40);
-      g.lineTo(-8, 30);
-      g.quadraticCurveTo(28, 0, -8, -30);
-      g.closePath();
-      g.rect(-34, -3, 56, 6);
-      plus(g);
+    case 'recruitKnight':
+      // Ghostly green troops waiting to join.
+      g.fillStyle = '#9dff8a';
+      g.strokeStyle = '#1d5a1a';
+      soldier(g, -28, 14, 0.9);
+      soldier(g, 28, 14, 0.9);
+      soldier(g, 0, 6, 1.1);
       break;
     case 'forge':
       // Anvil
@@ -379,30 +267,6 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       g.lineTo(-10, 14);
       g.lineTo(-14, -4);
       g.quadraticCurveTo(-30, -6, -40, -22);
-      g.closePath();
-      break;
-    case 'camp':
-      // Axe in a stump
-      g.rect(-34, 14, 68, 26);
-      g.moveTo(-6, 16);
-      g.lineTo(18, -36);
-      g.lineTo(26, -32);
-      g.lineTo(4, 18);
-      g.closePath();
-      g.moveTo(12, -40);
-      g.quadraticCurveTo(40, -36, 36, -12);
-      g.lineTo(18, -22);
-      g.closePath();
-      break;
-    case 'quarry':
-      // Pile of rocks
-      g.moveTo(-40, 38);
-      g.lineTo(-30, 4);
-      g.lineTo(-10, -6);
-      g.lineTo(2, -30);
-      g.lineTo(24, -20);
-      g.lineTo(32, 6);
-      g.lineTo(40, 38);
       g.closePath();
       break;
     case 'goldmine':
@@ -423,7 +287,7 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       }
       break;
     case 'wall':
-      // Palisade with a walkway
+      // Palisade
       for (let i = 0; i < 5; i++) {
         const x = -40 + i * 17;
         g.moveTo(x, 36);
@@ -435,20 +299,6 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       }
       g.rect(-44, 4, 88, 8);
       break;
-    case 'farm':
-      // Wheat sheaf
-      for (const a of [-0.5, -0.17, 0.17, 0.5]) {
-        g.save();
-        g.rotate(a);
-        g.moveTo(-4, 30);
-        g.lineTo(-4, -10);
-        g.quadraticCurveTo(0, -46, 4, -10);
-        g.lineTo(4, 30);
-        g.closePath();
-        g.restore();
-      }
-      g.rect(-22, 14, 44, 8);
-      break;
     case 'castle':
       // Crown
       g.moveTo(-38, 30);
@@ -459,14 +309,6 @@ function drawIcon(g: CanvasRenderingContext2D, kind: PlotKind) {
       g.lineTo(38, -24);
       g.lineTo(38, 30);
       g.closePath();
-      break;
-    case 'bowyer':
-      g.moveTo(-14, -40);
-      g.quadraticCurveTo(46, 0, -14, 40);
-      g.lineTo(-14, 30);
-      g.quadraticCurveTo(30, 0, -14, -30);
-      g.closePath();
-      g.rect(-18, -40, 4, 80);
       break;
   }
   g.stroke();

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Assets, CharRig } from './assets';
 import { GEO, MAT, blobShadow } from './models';
+import { bakeStatic } from './world';
 
 // Game objects assembled from KayKit models. One Assets instance is shared for the whole session.
 
@@ -80,6 +81,37 @@ function prepareItemGeometry(a: Assets) {
   itemMat.roughness = 0.4;
   const am = a.propMesh('arrow');
   if (am) MAT.arrowModel = am.material as THREE.MeshStandardMaterial;
+  kitGeo = layFlat(itemGeometry('shield_round_color', 0.62, false));
+  barGeo = layFlat(itemGeometry('Gold_Bar', 0.44, false));
+  const bm = a.propMesh('Gold_Bar');
+  barMat = (bm?.material as THREE.MeshStandardMaterial | undefined) ?? new THREE.MeshStandardMaterial({ color: 0xffc928, metalness: 0.8, roughness: 0.3 });
+}
+
+/** Rotates a geometry so its thinnest side faces up (and its base sits at y = 0). */
+function layFlat(g: THREE.BufferGeometry | null) {
+  if (!g) return new THREE.BoxGeometry(0.4, 0.1, 0.4);
+  g.computeBoundingBox();
+  const s = g.boundingBox!.getSize(new THREE.Vector3());
+  if (s.x < s.y && s.x <= s.z) g.rotateZ(Math.PI / 2);
+  else if (s.z < s.y && s.z < s.x) g.rotateX(Math.PI / 2);
+  g.computeBoundingBox();
+  g.translate(0, -g.boundingBox!.min.y, 0);
+  g.computeVertexNormals();
+  return g;
+}
+
+let kitGeo: THREE.BufferGeometry | null = null;
+let barGeo: THREE.BufferGeometry | null = null;
+let barMat: THREE.Material | null = null;
+/** A forge kit (a round shield): stacked in the king's arms and on the forge rack. */
+export function kitGeometry() {
+  return kitGeo!;
+}
+export function barGeometry() {
+  return barGeo!;
+}
+export function barMaterial() {
+  return barMat!;
 }
 
 // ---------------------------------------------------------------- characters
@@ -193,97 +225,54 @@ export function makeUnit(type: 'archer' | 'knight'): UnitRig {
 
 // ---------------------------------------------------------------- structures
 
-export interface TowerRig {
-  root: THREE.Group;
-  /** Level 2 decoration (flags). */
-  roof: THREE.Object3D;
-  /** Level 3: catapult tower replaces the plain one. */
-  ballista: THREE.Object3D;
-  base: THREE.Object3D;
-  slots: THREE.Vector3[];
-  /** Wooden towers keep their platform when the ballista goes on top. */
-  keepBaseWithBallista?: boolean;
-}
-
 /** Building style follows the castle: rough timber until the Stone Keep, then stone. */
 export type Era = 'wood' | 'stone';
 export const eraFor = (castleLevel: number): Era => (castleLevel >= 3 ? 'stone' : 'wood');
 
-/** Watchtower: a timber lookout platform in the wooden era, a stone tower later. */
-export function makeTower(era: Era = 'stone'): TowerRig {
+/** A timber lookout platform: up to six archers stand on top; level 2 mounts a ballista. */
+export function makeLookout() {
   const root = new THREE.Group();
-  if (era === 'wood') {
-    const base = A.prop('structure-floor', 2.6, 'max');
-    root.add(base);
-    const H = new THREE.Box3().setFromObject(base).max.y;
-    const roof = new THREE.Group();
-    for (const [x, z] of [
-      [-0.9, -0.9],
-      [0.9, 0.9],
-    ]) {
-      const f = A.prop('flag_blue', 1.4);
-      f.position.set(x, H, z);
-      roof.add(f);
-    }
-    roof.visible = false;
-    root.add(roof);
-    // Level 3: a ballista on the platform.
-    const ballista = A.prop('siege-ballista', 1.5, 'max');
-    ballista.position.set(0, H, 0.2);
-    ballista.visible = false;
-    root.add(ballista);
-    const slots = [new THREE.Vector3(-0.55, H, 0.45), new THREE.Vector3(0.55, H, -0.45)];
-    return { root, roof, ballista, base, slots, keepBaseWithBallista: true };
-  }
-  const H = 4.6;
-  const base = A.prop('building_tower_base_blue', H);
+  const base = A.prop('structure-floor', 3.1, 'max');
   root.add(base);
-  const cat = A.prop('building_tower_catapult_blue', H * 1.25);
-  cat.visible = false;
-  root.add(cat);
-  const roof = new THREE.Group();
+  const H = new THREE.Box3().setFromObject(base).max.y;
   for (const [x, z] of [
-    [-1.0, -1.0],
-    [1.0, 1.0],
+    [-1.3, -1.3],
+    [1.3, 1.3],
   ]) {
-    const f = A.prop('flag_blue', 1.6);
-    f.position.set(x, H - 0.1, z);
-    roof.add(f);
+    const f = A.prop('flag_blue', 1.5);
+    f.position.set(x, H, z);
+    root.add(f);
   }
-  roof.visible = false;
-  root.add(roof);
-  const slots = [new THREE.Vector3(-0.45, H - 0.35, 0.4), new THREE.Vector3(0.5, H - 0.35, -0.35)];
-  return { root, roof, ballista: cat, base, slots };
+  const ballista = A.prop('siege-ballista', 1.4, 'max');
+  ballista.position.set(0, H, -0.85);
+  ballista.visible = false;
+  root.add(ballista);
+  const slots: THREE.Vector3[] = [];
+  for (let i = 0; i < 6; i++) slots.push(new THREE.Vector3(((i % 3) - 1) * 0.8, H, i < 3 ? 0.45 : -0.3));
+  return { root, ballista, slots, height: H };
 }
 
-export function makePostFlag() {
-  const g = new THREE.Group();
-  const banner = A.prop('flag_blue', 3.2);
-  g.add(banner);
-  const rack = A.prop('weaponrack', 1.2);
-  rack.position.set(0.9, 0, 0.4);
-  g.add(rack);
-  return g;
-}
-
-/** A barricade spanning the road; local x runs across the road. */
-export function makeBarricade(len: number) {
-  const g = new THREE.Group();
-  const n = 2;
+/** A straight run of fence `len` long along local x: timber palisade, stone fence or castle wall. */
+export function makeFenceRun(tier: 'wood' | 'stone' | 'castle', len: number) {
+  const stage = new THREE.Group();
+  const name = tier === 'wood' ? 'fence-fortified' : tier === 'stone' ? 'fence_stone_straight' : 'wall_straight';
+  const want = tier === 'wood' ? 1.25 : tier === 'stone' ? 2.25 : 2.7;
+  const n = Math.max(1, Math.round(len / want));
+  const piece = len / n;
   for (let i = 0; i < n; i++) {
-    const f = A.prop('fence_wood_straight', len / n + 0.15, 'max');
-    // Lay the fence's long side across the road whichever way it was modelled.
-    const box = new THREE.Box3().setFromObject(f);
-    const size = box.getSize(new THREE.Vector3());
-    if (size.z > size.x) f.rotation.y = Math.PI / 2;
-    f.position.x = -len / 2 + (len / n) * (i + 0.5);
-    g.add(f);
+    const p = A.prop(name, 1, 'max');
+    const holder = new THREE.Group();
+    holder.add(p);
+    const box = new THREE.Box3().setFromObject(holder);
+    const sz = box.getSize(new THREE.Vector3());
+    if (sz.z > sz.x) p.rotation.y = Math.PI / 2;
+    const k = (piece + 0.04) / Math.max(sz.x, sz.z);
+    holder.scale.setScalar(tier === 'wood' ? k * 1.15 : k);
+    holder.scale.x = k;
+    holder.position.x = -len / 2 + piece * (i + 0.5);
+    stage.add(holder);
   }
-  const c1 = A.prop('crate_A_big', 0.9);
-  c1.position.set(-len / 2 - 0.4, 0, 0.3);
-  const c2 = A.prop('barrel', 0.9);
-  c2.position.set(len / 2 + 0.4, 0, -0.2);
-  g.add(c1, c2);
+  const g = bakeStatic(stage, [1, 1, 1]);
   return g;
 }
 
@@ -355,38 +344,6 @@ function campfire(x = 0.4, z = 2.0) {
   light.position.y = 0.9;
   g.add(light);
   g.position.set(x, 0, z);
-  return g;
-}
-
-/**
- * The town wall: a ring of wall pieces around the castle. `canPlace` keeps it off roads
- * (gates go there), buildings and plots. Low tiers only have scattered stakes.
- */
-export function makeTownWall(tier: { wall: string; coverage: number }, towers: boolean, cx: number, cz: number, r: number, canPlace: (x: number, z: number) => boolean) {
-  const g = new THREE.Group();
-  if (!tier.wall) return g;
-  const seg = tier.wall === 'wall_straight' ? 2.7 : 2.25;
-  const n = Math.floor((2 * Math.PI * r) / seg);
-  for (let i = 0; i < n; i++) {
-    // Deterministic "random" gaps for the early stake fence.
-    if (tier.coverage < 1 && ((i * 37) % 100) / 100 > tier.coverage) continue;
-    const th = (i / n) * Math.PI * 2;
-    const x = cx + Math.cos(th) * r;
-    const z = cz + Math.sin(th) * r;
-    if (!canPlace(x, z)) continue;
-    const holder = new THREE.Group();
-    const piece = A.prop(tier.wall, seg + 0.08, 'max');
-    orientAlongX(piece);
-    holder.add(piece);
-    holder.position.set(x, 0, z);
-    holder.rotation.y = -th - Math.PI / 2;
-    g.add(holder);
-    if (towers && i % 6 === 0) {
-      const t = A.prop('building_tower_A_blue', 4.4, 'y');
-      t.position.set(x, 0, z);
-      g.add(t);
-    }
-  }
   return g;
 }
 
@@ -465,64 +422,6 @@ export function makeShop(kind: 'range' | 'barracks' | 'forge' | 'bowyer', era: E
   return out;
 }
 
-/**
- * One section of the kingdom wall: an arc of wall pieces at radius r between angles a0 and a1,
- * a gate wherever a road crosses, and a lookout post for two archers.
- */
-export function makeWallSection(
-  tier: 'wood' | 'stone' | 'castle' | 'citadel',
-  cx: number,
-  cz: number,
-  r: number,
-  a0: number,
-  a1: number,
-  roadAngles: number[],
-  postAngle: number,
-) {
-  const g = new THREE.Group();
-  const piece = tier === 'wood' ? 'fence_wood_straight' : tier === 'stone' ? 'fence_stone_straight' : 'wall_straight';
-  const gateModel = tier === 'wood' ? 'fence_wood_straight_gate' : tier === 'stone' ? 'fence_stone_straight_gate' : 'wall_straight_gate';
-  const seg = piece === 'wall_straight' ? 2.7 : 2.25;
-  const n = Math.max(1, Math.round(((a1 - a0) * r) / seg));
-  const place = (obj: THREE.Object3D, th: number, rad = r) => {
-    const holder = new THREE.Group();
-    holder.add(obj);
-    holder.position.set(cx + Math.cos(th) * rad, 0, cz + Math.sin(th) * rad);
-    holder.rotation.y = -th - Math.PI / 2;
-    g.add(holder);
-    return holder;
-  };
-  const gateHalf = 2.8 / r;
-  for (let i = 0; i < n; i++) {
-    const th = a0 + ((i + 0.5) / n) * (a1 - a0);
-    if (roadAngles.some((ra) => Math.abs(angleDiff(th, ra)) < gateHalf)) continue;
-    const p = A.prop(piece, ((a1 - a0) * r) / n + 0.1, 'max');
-    orientAlongX(p);
-    place(p, th);
-  }
-  for (const ra of roadAngles) {
-    const gate = A.prop(gateModel, 4.6, 'max');
-    orientAlongX(gate);
-    place(gate, ra);
-  }
-  // Lookout post just inside the wall.
-  const post = tier === 'wood' ? A.prop('structure-floor', 2.2, 'max') : A.prop('building_tower_base_blue', 3.6, 'y');
-  const H = new THREE.Box3().setFromObject(post).max.y - (tier === 'wood' ? 0 : 0.3);
-  const postHolder = place(post, postAngle, r - 1.6);
-  if (tier === 'citadel') {
-    // Corner towers at both ends of the section.
-    for (const th of [a0, a1]) place(A.prop('building_tower_A_blue', 5.2, 'y'), th);
-  }
-  return { group: g, postHolder, postHeight: H };
-}
-
-function angleDiff(a: number, b: number) {
-  let d = a - b;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return d;
-}
-
 /** Treasure chest: returns the lid so it can swing open. */
 export function makeChest() {
   const root = A.prop('chest_gold', 1.2);
@@ -539,42 +438,6 @@ export function makeNpc(kind: 'worker' | 'villager') {
   char.root.add(blobShadow(0.38));
   char.loop('Idle');
   return char;
-}
-
-/**
- * A gatehouse spanning the road with wall wings to either side. Local x runs across the road.
- * `canPlace(localX)` lets the caller stop a wing before it runs into something.
- */
-export function makeGate(gateModel: string, wallModel: string, span: number, canPlace: (x: number) => boolean, castle: boolean) {
-  const g = new THREE.Group();
-  const height = castle ? 3.6 : 2.4;
-  const gate = A.prop(gateModel, span, 'max');
-  orientAlongX(gate);
-  g.add(gate);
-  const seg = castle ? 2.6 : 2.2;
-  for (const side of [-1, 1]) {
-    let x = side * (span / 2 + seg / 2);
-    for (let i = 0; i < 4; i++) {
-      if (!canPlace(x)) break;
-      const w = A.prop(wallModel, seg + 0.05, 'max');
-      orientAlongX(w);
-      w.position.x = x;
-      g.add(w);
-      x += side * seg;
-    }
-    // A flag marks each end of the wall.
-    const f = A.prop('flag_blue', height * 0.9);
-    f.position.set(x - side * seg * 0.5, 0, 0);
-    g.add(f);
-  }
-  return g;
-}
-
-/** Rotates a wall-like model so its long side runs along local x. */
-function orientAlongX(o: THREE.Object3D) {
-  const box = new THREE.Box3().setFromObject(o);
-  const s = box.getSize(new THREE.Vector3());
-  if (s.z > s.x) o.rotation.y = Math.PI / 2;
 }
 
 export function prop(name: string, size: number, axis: 'y' | 'x' | 'z' | 'max' = 'y') {
