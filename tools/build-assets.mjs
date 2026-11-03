@@ -215,17 +215,16 @@ if (JRA) {
   ];
   PROPS[`${JRA}/kaykit-resource-bits/3D/misc/Assets/gltf`] = ['Gold_Bar', 'Gold_Bars_Stack_Large', 'Gold_Bars_Stack_Small', 'Food_Pile_Large'];
   PROPS[`${JRA}/kenney-castle-kit/3D/fantasy/Models/GLB format`] = ['siege-ballista', 'flag-banner-long'];
-  // KayKit Forest Nature: dead trees and canyon rocks for the unclaimed wasteland, bushes for claimed land.
+  // KayKit Forest Nature: trees, bushes and rocks of the wild forest.
   PROPS[`${JRA}/kaykit-forest-nature/3D/nature/Assets/gltf`] = [
-    'Tree_Bare_1_A_Color7',
-    'Tree_Bare_1_B_Color7',
-    'Tree_Bare_2_A_Color7',
-    'Rock_1_A_Color4',
-    'Rock_3_A_Color4',
-    'Rock_3_C_Color4',
-    'Rock_6_A_Color4',
     'Bush_1_A_Color1',
+    'Tree_1_A_Color1',
+    'Tree_3_A_Color1',
     'Tree_4_A_Color1',
+    'Tree_5_A_Color1',
+    'Tree_7_A_Color1',
+    'Rock_1_A_Color1',
+    'Rock_3_C_Color1',
   ];
 }
 

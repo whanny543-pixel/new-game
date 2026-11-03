@@ -2,11 +2,11 @@
 
 A portrait, one-thumb medieval kingdom-defense game for iOS and Android.
 
-You are the king. Your realm is a dusty wasteland crawling with goblins. Lead your squad across it, fence in one land after another (each one turns green the moment its fence closes) and hold off ever-bigger goblin raids.
+You are the king. Your realm is a wild forest crawling with goblins. Lead your squad across it, fence in one land after another (the trees clear and it turns into a bright meadow the moment its fence closes) and hold off ever-bigger goblin raids.
 
 **How it plays**
 - **Drag** anywhere to move. The king and his squad fight on their own.
-- Goblins drop gold, and coin piles lie around the wasteland. Gold stacks up into a tower on the king's back. **Stand on a plot** and the gold flies off the stack into it.
+- Goblins drop gold, and coin piles lie around the forest. Gold stacks up into a tower on the king's back. **Stand on a plot** and the gold flies off the stack into it.
 - **Archery Range / Barracks:** pay the green recruit pad and a band of archers or knights runs out and joins the ring of troops marching around the king.
 - **Lookouts:** build a timber platform, then stand on its pad and your squad's archers climb up, one by one. Upgraded lookouts get a ballista.
 - **Fences:** each land is a square bordered by fence pieces. Build every piece around a land and it's **claimed**: grass and flowers spread out across it, its buildings unlock, houses and villagers move in, and a treasure chest pops up. Fences between two claimed lands sink away; the outer ones are your border.
@@ -24,7 +24,7 @@ You are the king. Your realm is a dusty wasteland crawling with goblins. Lead yo
 Built with Three.js and TypeScript (Vite), and packaged for the app stores with Capacitor.
 
 **Art (all CC0, free for commercial use):**
-- KayKit by Kay Lousberg (www.kaylousberg.com): characters, castle and town buildings, nature, dead trees and rocks (Forest Nature pack), gold bars.
+- KayKit by Kay Lousberg (www.kaylousberg.com): characters, castle and town buildings, nature, trees, bushes and rocks (Forest Nature pack), gold bars.
 - Kenney (www.kenney.nl): the timber palisade, lookout platforms, workbenches, campfires and the ballista.
 - Quaternius (quaternius.com): the goblin horde (Ultimate Monsters "Orc" and "Orc_Skull").
 
@@ -75,12 +75,12 @@ The script keeps only the animations the game uses, bundles all static models in
 | --- | --- |
 | `src/realm.ts` | The map of lands, build spots, and all conquest tuning (costs, raids, troops) |
 | `src/conquest.ts` | Gameplay: king, squad, lookouts, fences and claiming, workshops, raids, economy, hints |
-| `src/territory.ts` | Green spreading over claimed land, wasteland scenery, fog banks |
+| `src/territory.ts` | Meadows spreading over claimed land, the wild forest, mist |
 | `src/config.ts` | Player and goblin stats, kingdoms, armory |
 | `src/assets.ts` | Loads the 3D models; animated character rigs |
 | `src/horde.ts` | Baked instanced animations so hundreds of goblins stay cheap |
 | `src/structures.ts` | Castle, workshops, lookouts, fences, king and troops built from the models |
-| `src/models.ts` | Shared materials and small procedural bits (coins, mesas) |
+| `src/models.ts` | Shared materials and small procedural bits (coins, rings, shadows) |
 | `src/world.ts`, `src/road.ts` | Ground, winding trails, lighting, static-mesh merging |
 | `src/plot.ts` | Build-plot markers (icon, label, remaining cost) |
 | `src/perks.ts` | Level-up perk deck |

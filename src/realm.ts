@@ -1,4 +1,4 @@
-// The realm: a wasteland split into fenced lands. Fence a land in completely to claim it:
+// The realm: a wild forest split into fenced lands. Fence a land in completely to claim it:
 // the ground turns green, new buildings unlock and the frontier moves out.
 // All layout and conquest tuning lives here.
 
@@ -124,5 +124,5 @@ export const ARCHER_HP = [45, 65, 90, 120];
 
 export const MINE = { every: 2.6, perLevel: [1, 2], pileMax: 30, barValue: 2 };
 
-/** Loose treasure lying around the wasteland: walk over it to scoop it up. */
+/** Loose treasure lying around the forest: walk over it to scoop it up. */
 export const TREASURE = { perLand: 2, coins: 7 };

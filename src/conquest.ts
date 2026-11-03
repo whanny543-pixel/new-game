@@ -35,7 +35,7 @@ import {
 } from './realm';
 import { Territory } from './territory';
 
-// One conquest of a kingdom. The king leads a squad across a wasteland, fences in land after land
+// One conquest of a kingdom. The king leads a squad through a wild forest, fences in land after land
 // (each one turns green when closed), mans lookouts with archers and holds off the goblin hordes.
 // Everything created here lives under `root` and is thrown away on restart.
 
@@ -544,7 +544,7 @@ export class Conquest {
     }
   }
 
-  /** Piles of coins lying in the wasteland: a reason to venture out. */
+  /** Piles of coins lying in the forest: a reason to venture out. */
   private createTreasure() {
     let seed = 7 + this.map.mapX;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -650,6 +650,7 @@ export class Conquest {
     this.updateKeep(dt);
     this.updateVillagers(dt);
     this.territory.update(dt);
+    this.territory.fadeAround(this.heroPos, dt);
     this.updateGuide();
     this.updateStacks(dt);
     this.drawCrowd(dt);

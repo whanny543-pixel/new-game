@@ -109,7 +109,7 @@ export interface KingdomMap {
   waves: number;
   hpMul: number;
   countMul: number;
-  /** Dirt trails winding across the wasteland (decoration). */
+  /** Dirt trails winding through the forest (decoration). */
   roads: [number, number][][];
   palette: MapPalette;
   /** Position on the world map (0..100). */
@@ -117,7 +117,7 @@ export interface KingdomMap {
   mapY: number;
 }
 
-/** Old trails through the wasteland toward the keep. */
+/** Old trails through the forest toward the keep. */
 const TRAILS: [number, number][][] = [
   [
     [-4, -60],
@@ -151,22 +151,22 @@ export const KINGDOMS: KingdomMap[] = [
   {
     id: 'greenvale',
     name: 'Greenvale',
-    blurb: 'A dusty valley that was green once. The goblins are only testing you.',
+    blurb: 'A wild forest crawling with goblins. They are only testing you.',
     waves: 10,
     hpMul: 1,
     countMul: 0.85,
     roads: TRAILS,
     palette: {
-      ground: 0xd9b27c,
-      groundDark: 0xc49a64,
-      groundLight: 0xe9c894,
+      ground: 0x5d6b36,
+      groundDark: 0x4a5629,
+      groundLight: 0x76844a,
       tufts: [],
       flowers: [],
       decorTint: [1, 1, 1],
-      sky: 0xa6d8f0,
-      fog: 0xf0e2c8,
-      road: 0xecd3a4,
-      roadEdge: 0xdcbc88,
+      sky: 0x9fd4f2,
+      fog: 0xcfe6d6,
+      road: 0x9a7650,
+      roadEdge: 0x86663f,
     },
     mapX: 22,
     mapY: 74,
@@ -174,22 +174,22 @@ export const KINGDOMS: KingdomMap[] = [
   {
     id: 'amberwood',
     name: 'Amberwood',
-    blurb: 'Red clay badlands. Bigger warbands, tougher goblins.',
+    blurb: 'An autumn forest. Bigger warbands, tougher goblins.',
     waves: 12,
     hpMul: 1.3,
     countMul: 1.1,
     roads: mirror(TRAILS),
     palette: {
-      ground: 0xd09460,
-      groundDark: 0xb87a4a,
-      groundLight: 0xe2aa74,
+      ground: 0x7a5a30,
+      groundDark: 0x664a24,
+      groundLight: 0x946e3c,
       tufts: [],
       flowers: [],
-      decorTint: [1.1, 0.88, 0.72],
+      decorTint: [1.45, 0.92, 0.5],
       sky: 0xf2d1a0,
-      fog: 0xf0c890,
-      road: 0xe4b484,
-      roadEdge: 0xcf9a68,
+      fog: 0xf0d2a8,
+      road: 0xa07a50,
+      roadEdge: 0x8a6840,
     },
     mapX: 48,
     mapY: 56,
@@ -197,22 +197,22 @@ export const KINGDOMS: KingdomMap[] = [
   {
     id: 'ashmoor',
     name: 'Ashmoor',
-    blurb: 'A burnt moor at dusk. Huge hordes and more ogres.',
+    blurb: 'A dark, haunted forest at dusk. Huge hordes and more ogres.',
     waves: 14,
     hpMul: 1.5,
     countMul: 1.25,
     roads: TRAILS,
     palette: {
-      ground: 0x8f8a7e,
-      groundDark: 0x77736a,
-      groundLight: 0xa39e90,
+      ground: 0x46503a,
+      groundDark: 0x384030,
+      groundLight: 0x58624a,
       tufts: [],
       flowers: [],
-      decorTint: [0.72, 0.72, 0.78],
+      decorTint: [0.62, 0.7, 0.78],
       sky: 0x8a86a8,
       fog: 0x9a96b0,
-      road: 0xa8a090,
-      roadEdge: 0x948c7c,
+      road: 0x6e604c,
+      roadEdge: 0x5c5040,
     },
     mapX: 70,
     mapY: 38,
@@ -220,7 +220,7 @@ export const KINGDOMS: KingdomMap[] = [
   {
     id: 'frostpeak',
     name: 'Frostpeak',
-    blurb: 'A frozen pass. Bring spring back, one land at a time. The final stand.',
+    blurb: 'A snowy pine forest. Bring spring back, one land at a time. The final stand.',
     waves: 16,
     hpMul: 1.75,
     countMul: 1.4,
@@ -234,8 +234,8 @@ export const KINGDOMS: KingdomMap[] = [
       decorTint: [1.25, 1.35, 1.5],
       sky: 0xc9dff0,
       fog: 0xdfeaf4,
-      road: 0xcfd8e2,
-      roadEdge: 0xb8c6d4,
+      road: 0xb8a294,
+      roadEdge: 0xa08a7c,
     },
     mapX: 82,
     mapY: 16,

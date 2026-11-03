@@ -146,21 +146,3 @@ export function blobShadow(radius: number) {
 }
 
 // ---------------------------------------------------------------- Scenery
-
-/** Layered mesa: stacked, slightly shrinking slabs with striped strata. */
-export function makeMesa(rng: () => number) {
-  const k = new Kit();
-  const layers = 2 + Math.floor(rng() * 3);
-  let w = 4 + rng() * 5;
-  let d = 3 + rng() * 4;
-  let y = 0;
-  for (let i = 0; i < layers; i++) {
-    const h = 1.4 + rng() * 1.6;
-    const c = i % 2 ? COLORS.cliffDark : rng() > 0.5 ? COLORS.cliff : COLORS.cliffLight;
-    k.add(new THREE.CylinderGeometry(1, 1.08, 1, 7), c, (rng() - 0.5) * 0.6, y + h / 2, (rng() - 0.5) * 0.6, 0, rng() * 6, 0, w / 2, h, d / 2);
-    y += h;
-    w *= 0.8 + rng() * 0.12;
-    d *= 0.8 + rng() * 0.12;
-  }
-  return k.mesh(true);
-}
