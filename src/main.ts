@@ -43,9 +43,11 @@ class App {
     requestAnimationFrame((t) => this.frame(t));
   }
 
-  private applyPrefs(p: { sound: boolean; eva: boolean; shadows: boolean }) {
+  private applyPrefs(p: { sound: boolean; eva: boolean; shadows: boolean; music: boolean }) {
     this.audio.enabled = p.sound;
     this.audio.evaEnabled = p.eva;
+    this.audio.musicEnabled = p.music;
+    this.audio.music(!!this.game && !this.paused);
     if (this.scene) this.scene.renderer.shadowMap.enabled = p.shadows && this.scene.quality === 'high';
   }
 
@@ -77,11 +79,17 @@ class App {
     this.resize();
     (window as unknown as { __app: unknown }).__app = { game, scene, ctl, hud };
     this.audio.unlock();
+    this.audio.music(true);
+    hud.onSpeed = () => {
+      ctl.speed = ctl.speed >= 2 ? 1 : ctl.speed + 0.5;
+      hud.toast('Game speed ' + ctl.speed + '×');
+    };
     setTimeout(() => this.audio.eva('Battle control online'), 600);
     hud.toast('Tap a dozer, then a building to start construction', 'info');
   }
 
   private cleanup() {
+    this.audio.music(false);
     this.input?.dispose();
     this.hud?.dispose();
     this.scene?.dispose();
@@ -95,10 +103,12 @@ class App {
   private pause() {
     if (!this.game || this.ended) return;
     this.paused = true;
+    this.audio.music(false);
     this.menus.show('pause');
   }
   private resume() {
     this.paused = false;
+    this.audio.music(true);
     this.menus.show('none');
     this.last = performance.now();
   }

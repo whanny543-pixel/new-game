@@ -135,6 +135,11 @@ const LIMITS: Record<string, number> = { rifle: 0.05, mg: 0.05, gatling: 0.04, h
 export class AudioSys {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private musicGain: GainNode | null = null;
+  private musicTimer = 0;
+  private musicStep = 0;
+  private musicNext = 0;
+  musicEnabled = true;
   private last: Record<string, number> = {};
   enabled = true;
   evaEnabled = true;
@@ -157,10 +162,49 @@ export class AudioSys {
       this.master.gain.value = 0.5;
       const comp = this.ctx.createDynamicsCompressor();
       this.master.connect(comp).connect(this.ctx.destination);
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = 0;
+      this.musicGain.connect(comp);
     } catch {
       this.ctx = null;
     }
     if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
+  }
+
+  /** Start / stop the generative military-drum loop. */
+  music(on: boolean) {
+    if (!this.ctx || !this.musicGain) return;
+    const want = on && this.musicEnabled && this.enabled ? 0.22 : 0;
+    this.musicGain.gain.setTargetAtTime(want, this.ctx.currentTime, 0.8);
+    if (want > 0 && !this.musicTimer) {
+      this.musicNext = this.ctx.currentTime + 0.1;
+      this.musicTimer = window.setInterval(() => this.scheduleMusic(), 250);
+    } else if (want === 0 && this.musicTimer) {
+      clearInterval(this.musicTimer);
+      this.musicTimer = 0;
+    }
+  }
+
+  /** Schedules the next few 16th notes: kick, snare, hats and a slow bass drone in D minor. */
+  private scheduleMusic() {
+    const ctx = this.ctx, out = this.musicGain;
+    if (!ctx || !out) return;
+    const bpm = 96, step = 60 / bpm / 4;
+    while (this.musicNext < ctx.currentTime + 0.6) {
+      const i = this.musicStep % 64, t = this.musicNext;
+      const bar = Math.floor(this.musicStep / 16) % 4;
+      if (i % 16 === 0 || i % 16 === 10 || (bar === 3 && i % 16 === 14)) tone(ctx, out, t, 0.25, 110, 35, 0.9); // kick
+      if (i % 16 === 4 || i % 16 === 12) burst(ctx, out, t, 0.18, 1800, 0.6, 0.45); // snare
+      if (i % 2 === 0) burst(ctx, out, t, 0.04, 8000, 1.5, i % 4 === 0 ? 0.12 : 0.07, 'highpass'); // hats
+      if (i % 32 === 0) {
+        const root = [73.4, 73.4, 87.3, 65.4][bar]; // D, D, F, C
+        tone(ctx, out, t, step * 30, root, root, 0.18, 'sawtooth');
+        tone(ctx, out, t, step * 30, root * 1.5, root * 1.5, 0.06, 'triangle');
+      }
+      if (i % 8 === 6 && bar >= 2) tone(ctx, out, t, 0.3, 293.7 * (i % 16 === 6 ? 1 : 1.2), 293.7 * (i % 16 === 6 ? 1 : 1.2), 0.05, 'square');
+      this.musicStep++;
+      this.musicNext += step;
+    }
   }
 
   play(name: string, x?: number, y?: number) {

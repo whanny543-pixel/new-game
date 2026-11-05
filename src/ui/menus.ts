@@ -8,6 +8,7 @@ export interface Prefs {
   sound: boolean;
   eva: boolean;
   shadows: boolean;
+  music: boolean;
   setup: {
     mapId: string;
     faction: FactionId;
@@ -24,7 +25,7 @@ const KEY = 'irondoctrine.prefs.v1';
 
 export function loadPrefs(): Prefs {
   const def: Prefs = {
-    sound: true, eva: true, shadows: true,
+    sound: true, eva: true, shadows: true, music: true,
     setup: { mapId: 'dust', faction: 'coalition', opponents: [{ faction: 'random', difficulty: 'medium' }], teams: 'ffa', cash: 10000, superweapons: true },
     wins: 0, losses: 0,
   };
@@ -122,7 +123,7 @@ export class Menus {
 
   private buildSettings() {
     const p = this.prefs;
-    const bind = (id: string, key: 'sound' | 'eva' | 'shadows') => {
+    const bind = (id: string, key: 'sound' | 'eva' | 'shadows' | 'music') => {
       const el = this.$(id) as HTMLInputElement;
       el.checked = p[key];
       el.onchange = () => {
@@ -134,6 +135,7 @@ export class Menus {
     bind('opt-sound', 'sound');
     bind('opt-eva', 'eva');
     bind('opt-shadows', 'shadows');
+    bind('opt-music', 'music');
     this.$('settings-back').onclick = () => this.show((this.$('settings-back').dataset.target as 'main' | 'pause') ?? 'main');
   }
 

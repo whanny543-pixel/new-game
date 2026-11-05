@@ -8,7 +8,7 @@ import type { Game } from '../game/game';
 import type { Projectile } from '../game/combat';
 import type { Flyer } from '../game/powers';
 import { Effects } from './effects';
-import { buildingModel, crateModel, flyerModel, propModel, scaffoldModel, supplyPileModel, unitModel, type ModelDef } from './models';
+import { buildingModel, crateModel, flyerModel, propModel, scaffoldModel, supplyPileModel, tintedModel, unitModel, type ModelDef } from './models';
 import { clamp, lerp } from '../core/math';
 
 const NEUTRAL_STYLE = { hull: 0x8a8a80, accent: 0x9a9a90, roof: 0xa0a090, trim: 0x555 };
@@ -50,7 +50,7 @@ export class SceneView {
   zoom = 27;
   pitch = 0.96;
   yaw = 0;
-  effects = new Effects();
+  effects: Effects;
   private game: Game;
   private map: GameMap;
   private views = new Map<number, EntityView>();
@@ -109,6 +109,7 @@ export class SceneView {
     this.fogTex.minFilter = THREE.LinearFilter;
     this.fogTex.needsUpdate = true;
     this.fogUniforms = { uFog: { value: this.fogTex }, uMapSize: { value: new THREE.Vector2(this.map.w, this.map.h) } };
+    this.effects = new Effects(this.fogUniforms, (m) => this.withFog(m));
 
     this.hullMat = this.withFog(new THREE.MeshLambertMaterial({ vertexColors: true }));
     this.hullGhostMat = this.withFog(new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 0.45 }));
@@ -143,7 +144,7 @@ export class SceneView {
 
     const lanceGeo = new THREE.CylinderGeometry(0.5, 1.4, 60, 10, 1, true);
     lanceGeo.translate(0, 30, 0);
-    this.lanceMesh = new THREE.Mesh(lanceGeo, new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    this.lanceMesh = new THREE.Mesh(lanceGeo, this.withFog(new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })));
     this.lanceMesh.visible = false;
     this.scene.add(this.lanceMesh);
 
@@ -171,15 +172,15 @@ export class SceneView {
     g.nuke = new THREE.CylinderGeometry(0.35, 0.35, 2.6, 8);
     g.scud = new THREE.CylinderGeometry(0.2, 0.2, 1.8, 8);
     const m = this.projMats;
-    m.shell = new THREE.MeshLambertMaterial({ color: 0x222222 });
-    m.molotov = new THREE.MeshBasicMaterial({ color: 0xff9a2a });
-    m.barrage = new THREE.MeshLambertMaterial({ color: 0x333333 });
-    m.rocket = new THREE.MeshLambertMaterial({ color: 0xdddddd });
-    m.missile = new THREE.MeshLambertMaterial({ color: 0xf0f0f0 });
-    m.napalm = new THREE.MeshLambertMaterial({ color: 0xff7a2a });
-    m.bomb = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
-    m.nuke = new THREE.MeshLambertMaterial({ color: 0xffffff });
-    m.scud = new THREE.MeshLambertMaterial({ color: 0x6b7a4a });
+    m.shell = this.withFog(new THREE.MeshLambertMaterial({ color: 0x222222 }));
+    m.molotov = this.withFog(new THREE.MeshBasicMaterial({ color: 0xff9a2a }));
+    m.barrage = this.withFog(new THREE.MeshLambertMaterial({ color: 0x333333 }));
+    m.rocket = this.withFog(new THREE.MeshLambertMaterial({ color: 0xdddddd }));
+    m.missile = this.withFog(new THREE.MeshLambertMaterial({ color: 0xf0f0f0 }));
+    m.napalm = this.withFog(new THREE.MeshLambertMaterial({ color: 0xff7a2a }));
+    m.bomb = this.withFog(new THREE.MeshLambertMaterial({ color: 0x3a3a3a }));
+    m.nuke = this.withFog(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+    m.scud = this.withFog(new THREE.MeshLambertMaterial({ color: 0x6b7a4a }));
 
     const st = this.map.starts[viewer.id % this.map.starts.length];
     this.focus.x = st.x;
@@ -436,23 +437,43 @@ export class SceneView {
     const body = new THREE.Group();
     group.add(body);
     const style = this.styleFor(e);
-    const teamMat = this.teamMats[e.owner.color % this.teamMats.length];
     const teamMeshes: THREE.Mesh[] = [], hullMeshes: THREE.Mesh[] = [];
     let def: ModelDef;
     let turret: THREE.Group | null = null;
     let rotor: THREE.Mesh | null = null, rotor2: THREE.Mesh | null = null, dish: THREE.Mesh | null = null;
     let scaffold: THREE.Mesh | null = null;
+    let key: string;
     if (e.kind === 'crate') {
       def = { hull: crateModel(), team: null, turret: null, rotor: null, rotor2: null, dish: null, height: 0.6 };
-    } else if (e.isUnit) def = unitModel(e.udef!.model, style);
-    else def = buildingModel(e.bdef!.model, style, e.w, e.h);
-    this.makeMeshes(def, teamMat, this.hullMat, body, teamMeshes, hullMeshes);
+      key = 'crate';
+    } else if (e.isUnit) {
+      def = unitModel(e.udef!.model, style);
+      key = 'u:' + e.udef!.model + ':' + style.hull;
+    } else {
+      def = buildingModel(e.bdef!.model, style, e.w, e.h);
+      key = 'b:' + e.bdef!.model + ':' + style.hull + ':' + e.w + 'x' + e.h;
+    }
+    const teamColor = e.owner.id < 0 ? 0xbdbdb5 : TEAM_COLORS[e.owner.color % TEAM_COLORS.length];
+    const tinted = tintedModel(def, key, teamColor);
+    if (tinted.body) {
+      const m = new THREE.Mesh(tinted.body, this.hullMat);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      body.add(m);
+      hullMeshes.push(m);
+    }
     if (def.turret) {
       turret = new THREE.Group();
       turret.position.set(def.turret.pivot[0], def.turret.pivot[1], def.turret.pivot[2]);
-      this.makeMeshes({ ...def, hull: def.turret.geo, team: def.turret.team }, teamMat, this.hullMat, turret, teamMeshes, hullMeshes);
+      if (tinted.turret) {
+        const m = new THREE.Mesh(tinted.turret, this.hullMat);
+        m.castShadow = true;
+        turret.add(m);
+        hullMeshes.push(m);
+      }
       body.add(turret);
     }
+    if (e.isUnit && e.udef!.move === 'infantry') body.scale.setScalar(1.25);
     const spin = (r: { geo: THREE.BufferGeometry; pivot: [number, number, number] }) => {
       const m = new THREE.Mesh(r.geo, this.hullMat);
       m.position.set(r.pivot[0], r.pivot[1], r.pivot[2]);
@@ -481,12 +502,16 @@ export class SceneView {
   }
 
   private setTeam(v: EntityView, ghost: boolean) {
-    const col = v.e.owner.color % this.teamMats.length;
-    const tm = ghost ? this.teamGhostMats[col] : this.teamMats[col];
-    for (const m of v.teamMeshes) m.material = tm;
     for (const m of v.hullMeshes) m.material = ghost ? this.hullGhostMat : this.hullMat;
     v.ownerId = v.e.owner.id;
     v.stealthShown = ghost;
+  }
+  /** Captured: the team colour is baked into the geometry, so build a fresh view. */
+  private rebuildView(v: EntityView) {
+    this.scene.remove(v.group);
+    const nv = this.createView(v.e);
+    this.views.set(v.e.id, nv);
+    return nv;
   }
 
   private updateFog(viewer: Player) {
@@ -571,7 +596,7 @@ export class SceneView {
       const visible = game.canSee(viewer, e);
       v.group.visible = visible;
       if (!visible) continue;
-      if (v.ownerId !== e.owner.id) this.setTeam(v, v.stealthShown);
+      if (v.ownerId !== e.owner.id) v = this.rebuildView(v);
       const ghostly = e.stealthActive && !e.detected && e.revealTimer <= 0;
       if (ghostly !== v.stealthShown) this.setTeam(v, ghostly);
       const gy = e.isBuilding ? e.z : this.map.heightAt(e.x, e.y);

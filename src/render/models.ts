@@ -631,6 +631,32 @@ const buildingBuilders: Record<string, (k: Kit, s: FactionDef['style'], w: numbe
 };
 
 const cache = new Map<string, ModelDef>();
+const tintCache = new Map<string, { body: THREE.BufferGeometry | null; turret: THREE.BufferGeometry | null }>();
+
+function paint(g: THREE.BufferGeometry, color: number) {
+  const c = new THREE.Color(color);
+  const out = g.clone();
+  const attr = out.getAttribute('color') as THREE.BufferAttribute;
+  for (let i = 0; i < attr.count; i++) attr.setXYZ(i, c.r, c.g, c.b);
+  return out;
+}
+
+/** Hull and team-coloured parts merged into one geometry per player colour (one draw call). */
+export function tintedModel(def: ModelDef, key: string, color: number) {
+  const ck = key + ':' + color;
+  let t = tintCache.get(ck);
+  if (t) return t;
+  const mergeParts = (hull: THREE.BufferGeometry | null, team: THREE.BufferGeometry | null) => {
+    const parts: THREE.BufferGeometry[] = [];
+    if (hull) parts.push(hull);
+    if (team) parts.push(paint(team, color));
+    if (!parts.length) return null;
+    return parts.length === 1 ? parts[0] : mergeGeometries(parts, false);
+  };
+  t = { body: mergeParts(def.hull, def.team), turret: def.turret ? mergeParts(def.turret.geo, def.turret.team) : null };
+  tintCache.set(ck, t);
+  return t;
+}
 
 export function unitModel(key: string, style: FactionDef['style']): ModelDef {
   const ck = 'u:' + key + ':' + style.hull;

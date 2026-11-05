@@ -33,6 +33,7 @@ export class Controller implements InputHandler {
   speed = 1;
   paused = false;
   toast: (msg: string, kind?: 'info' | 'error') => void = () => {};
+  openPromo: () => void = () => {};
   /** Set by the HUD when the selection should be re-read. */
   selectionVersion = 0;
   lastAlert: { x: number; y: number } | null = null;
@@ -240,7 +241,8 @@ export class Controller implements InputHandler {
     const ps = this.viewer.powers.get(id);
     if (!ps) return;
     if (ps.level <= 0) {
-      this.toast('Not unlocked. Spend a generals point first.', 'error');
+      if (this.viewer.points > 0 && this.viewer.rank >= ps.def.rank) this.openPromo();
+      else this.toast(this.viewer.rank < ps.def.rank ? `Requires rank ${ps.def.rank}` : 'Earn a promotion to unlock this power', 'error');
       return;
     }
     if (ps.cooldown > 0) {

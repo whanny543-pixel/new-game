@@ -54,6 +54,7 @@ export class Hud {
   private color: string;
   promoOpen = false;
   onPause: () => void = () => {};
+  onSpeed: () => void = () => {};
 
   constructor(root: HTMLElement, ctl: Controller) {
     this.root = root;
@@ -62,7 +63,9 @@ export class Hud {
     this.mmCtx = this.minimap.getContext('2d')!;
     this.mmBase = this.buildMinimapBase();
     ctl.toast = (msg, kind) => this.toast(msg, kind);
+    ctl.openPromo = () => this.togglePromo(true);
     this.$('btn-pause').onclick = () => this.onPause();
+    this.clock.onclick = () => this.onSpeed();
     this.$('btn-army').onclick = () => ctl.selectAllArmy();
     this.$('btn-base').onclick = () => ctl.focusBase();
     this.$('mode-cancel').onclick = () => ctl.cancelMode();
@@ -497,7 +500,7 @@ export class Hud {
     this.rank.innerHTML = `<b>★${v.rank}</b>${v.points ? `<em>${v.points}</em>` : ''}`;
     this.rank.classList.toggle('pulse', v.points > 0);
     this.rank.title = next ? `${Math.floor(v.xp)}/${next} XP` : 'Max rank';
-    this.clock.textContent = formatTime(game.time);
+    this.clock.textContent = formatTime(game.time) + (ctl.speed !== 1 ? ' ' + ctl.speed + '×' : '');
     // Mode hint.
     const hint = ctl.modeHint;
     this.hint.classList.toggle('hidden', !hint);

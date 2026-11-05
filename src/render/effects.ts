@@ -6,6 +6,11 @@ import type { Field } from '../game/combat';
 
 const MAX = 3000;
 
+export interface FogUniforms {
+  uFog: { value: THREE.Texture };
+  uMapSize: { value: THREE.Vector2 };
+}
+
 class PointSystem {
   geo = new THREE.BufferGeometry();
   pos = new Float32Array(MAX * 3);
@@ -20,14 +25,14 @@ class PointSystem {
   baseA = new Float32Array(MAX);
   count = 0;
   points: THREE.Points;
-  constructor(additive: boolean) {
+  constructor(additive: boolean, fog: FogUniforms) {
     this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
     this.geo.setAttribute('color', new THREE.BufferAttribute(this.col, 4).setUsage(THREE.DynamicDrawUsage));
     this.geo.setAttribute('size', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uScale: { value: 300 } },
-      vertexShader: `attribute float size; attribute vec4 color; varying vec4 vC; uniform float uScale;
-        void main(){ vC = color; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = size * (uScale / -mv.z); gl_Position = projectionMatrix * mv; }`,
+      uniforms: { uScale: { value: 300 }, uFog: fog.uFog, uMapSize: fog.uMapSize },
+      vertexShader: `attribute float size; attribute vec4 color; varying vec4 vC; uniform float uScale; uniform sampler2D uFog; uniform vec2 uMapSize;
+        void main(){ vC = color; float fv = texture2D(uFog, position.xz / uMapSize).r; vC.a *= smoothstep(0.1, 0.6, fv); vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = size * (uScale / -mv.z); gl_Position = projectionMatrix * mv; }`,
       fragmentShader: `varying vec4 vC; void main(){ vec2 d = gl_PointCoord - 0.5; float r = length(d); if (r > 0.5) discard; float a = smoothstep(0.5, 0.12, r) * vC.a; gl_FragColor = vec4(vC.rgb, a); }`,
       transparent: true,
       depthWrite: false,
@@ -113,8 +118,9 @@ const LINES = 400;
 
 export class Effects {
   group = new THREE.Group();
-  fire = new PointSystem(true);
-  smoke = new PointSystem(false);
+  fire: PointSystem;
+  smoke: PointSystem;
+  private fogify: <T extends THREE.Material>(m: T) => T;
   private flashes: Flash[] = [];
   private flashPool: Flash[] = [];
   private beams: Beam[] = [];
@@ -131,11 +137,14 @@ export class Effects {
   shake = 0;
   heightAt: (x: number, y: number) => number = () => 0;
 
-  constructor() {
+  constructor(fog: FogUniforms, fogify: <T extends THREE.Material>(m: T) => T) {
+    this.fogify = fogify;
+    this.fire = new PointSystem(true, fog);
+    this.smoke = new PointSystem(false, fog);
     this.group.add(this.fire.points, this.smoke.points);
     this.lineGeo.setAttribute('position', new THREE.BufferAttribute(this.linePos, 3).setUsage(THREE.DynamicDrawUsage));
     this.lineGeo.setAttribute('color', new THREE.BufferAttribute(this.lineCol, 3).setUsage(THREE.DynamicDrawUsage));
-    const lines = new THREE.LineSegments(this.lineGeo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+    const lines = new THREE.LineSegments(this.lineGeo, fogify(new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })));
     lines.frustumCulled = false;
     this.group.add(lines);
     this.lineGeo.setDrawRange(0, 0);
@@ -145,7 +154,7 @@ export class Effects {
   private flash(x: number, y: number, z: number, size: number, color: number, dur = 0.25) {
     let f = this.flashPool.pop();
     if (!f) {
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+      const mat = this.fogify(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
       f = { mesh: new THREE.Mesh(this.sphereGeo, mat), t: 0, dur, size, mat };
       this.group.add(f.mesh);
     }
@@ -163,7 +172,7 @@ export class Effects {
   beam(x1: number, y1: number, z1: number, x2: number, y2: number, z2: number, radius: number, color: number, dur: number) {
     let b = this.beamPool.pop();
     if (!b) {
-      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+      const mat = this.fogify(new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
       b = { mesh: new THREE.Mesh(this.beamGeo, mat), t: 0, dur, mat };
       this.group.add(b.mesh);
     }

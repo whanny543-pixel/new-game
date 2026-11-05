@@ -22,6 +22,8 @@ const DEFENSES = new Set(['c_aegis', 'd_gatling', 'i_nest', 'i_tunnel', 'i_trap'
 
 interface Tuning {
   armyCap: number;
+  /** Stop producing combat units above this total value until a wave goes out. */
+  valueCap: number;
   attackValue: number;
   waveEvery: number;
   reserve: number;
@@ -32,9 +34,9 @@ interface Tuning {
   firstAttack: number;
 }
 const TUNING: Record<'easy' | 'medium' | 'hard', Tuning> = {
-  easy: { armyCap: 14, attackValue: 7000, waveEvery: 330, reserve: 800, gatherersPerDepot: 2, maxBuild: 9, usePowers: false, firstAttack: 480 },
-  medium: { armyCap: 28, attackValue: 5000, waveEvery: 240, reserve: 400, gatherersPerDepot: 3, maxBuild: 15, usePowers: true, firstAttack: 330 },
-  hard: { armyCap: 44, attackValue: 4200, waveEvery: 180, reserve: 200, gatherersPerDepot: 3, maxBuild: 99, usePowers: true, firstAttack: 240 },
+  easy: { armyCap: 12, valueCap: 3000, attackValue: 2500, waveEvery: 300, reserve: 800, gatherersPerDepot: 2, maxBuild: 9, usePowers: false, firstAttack: 480 },
+  medium: { armyCap: 22, valueCap: 4000, attackValue: 3500, waveEvery: 240, reserve: 400, gatherersPerDepot: 2, maxBuild: 15, usePowers: true, firstAttack: 330 },
+  hard: { armyCap: 44, valueCap: 12000, attackValue: 5000, waveEvery: 180, reserve: 200, gatherersPerDepot: 3, maxBuild: 99, usePowers: true, firstAttack: 240 },
 };
 
 function isCombat(u: Entity) {
@@ -218,7 +220,8 @@ export function updateAi(game: Game, p: Player, dt: number) {
   for (const g of gatherers) if (g.order.type === 'none' && !(ins && g.order.type !== 'none')) game.cmdGather([g], null);
 
   // ---- army production.
-  if (army.length < T.armyCap && p.money > T.reserve) {
+  const armyValueNow = army.reduce((s, u) => s + u.cost, 0);
+  if (army.length < T.armyCap && armyValueNow < T.valueCap && p.money > T.reserve) {
     for (const b of buildings) {
       if (!b.built || !b.bdef!.produces || b.production.length) continue;
       const options = ARMY[p.faction].filter(([id]) => b.bdef!.produces!.includes(id) && !game.buildBlocker(p, UNITS[id]) && UNITS[id].cost + T.reserve <= p.money);
