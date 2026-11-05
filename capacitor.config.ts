@@ -1,12 +1,12 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.outpostrush.game',
-  appName: 'Outpost Rush',
+  appId: 'com.irondoctrine.game',
+  appName: 'Iron Doctrine',
   webDir: 'dist',
-  backgroundColor: '#1b1030',
+  backgroundColor: '#10141a',
   ios: { contentInset: 'never' },
-  android: { backgroundColor: '#1b1030' },
+  android: { backgroundColor: '#10141a' },
 };
 
 export default config;

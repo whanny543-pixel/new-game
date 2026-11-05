@@ -1,120 +1,226 @@
-// Tiny synthesized sound effects — no audio files to ship or license.
+// Synthesized sound effects (no audio files) plus EVA-style voice lines via speech synthesis.
+import { dist } from './core/math';
 
-type Wave = OscillatorType;
+type Recipe = (ctx: AudioContext, out: GainNode, t: number) => void;
 
-export class Sfx {
+function noise(ctx: AudioContext, dur: number) {
+  const len = Math.floor(ctx.sampleRate * dur);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  return src;
+}
+
+function burst(ctx: AudioContext, out: GainNode, t: number, dur: number, freq: number, q: number, gain: number, type: BiquadFilterType = 'bandpass') {
+  const n = noise(ctx, dur);
+  const f = ctx.createBiquadFilter();
+  f.type = type;
+  f.frequency.value = freq;
+  f.Q.value = q;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  n.connect(f).connect(g).connect(out);
+  n.start(t);
+  n.stop(t + dur);
+}
+
+function tone(ctx: AudioContext, out: GainNode, t: number, dur: number, f0: number, f1: number, gain: number, type: OscillatorType = 'sine') {
+  const o = ctx.createOscillator();
+  o.type = type;
+  o.frequency.setValueAtTime(f0, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g).connect(out);
+  o.start(t);
+  o.stop(t + dur);
+}
+
+const RECIPES: Record<string, Recipe> = {
+  rifle: (c, o, t) => burst(c, o, t, 0.08, 1800, 1.2, 0.35),
+  mg: (c, o, t) => {
+    burst(c, o, t, 0.07, 1200, 1, 0.4);
+    tone(c, o, t, 0.05, 300, 80, 0.2, 'square');
+  },
+  gatling: (c, o, t) => burst(c, o, t, 0.05, 2600, 2, 0.25, 'highpass'),
+  sniper: (c, o, t) => {
+    burst(c, o, t, 0.25, 900, 0.8, 0.6);
+    tone(c, o, t, 0.2, 600, 100, 0.3, 'sawtooth');
+  },
+  cannon: (c, o, t) => {
+    burst(c, o, t, 0.3, 300, 0.8, 0.9, 'lowpass');
+    tone(c, o, t, 0.25, 160, 40, 0.7, 'sine');
+  },
+  artillery: (c, o, t) => {
+    burst(c, o, t, 0.5, 200, 0.8, 1.0, 'lowpass');
+    tone(c, o, t, 0.4, 120, 30, 0.9, 'sine');
+  },
+  rocket: (c, o, t) => burst(c, o, t, 0.45, 700, 0.6, 0.4),
+  missile: (c, o, t) => burst(c, o, t, 0.8, 500, 0.5, 0.6),
+  laser: (c, o, t) => tone(c, o, t, 0.18, 1800, 400, 0.25, 'sawtooth'),
+  hack: (c, o, t) => {
+    tone(c, o, t, 0.1, 800, 1600, 0.15, 'square');
+    tone(c, o, t + 0.12, 0.1, 1200, 2400, 0.15, 'square');
+  },
+  flame: (c, o, t) => burst(c, o, t, 0.3, 400, 0.4, 0.3, 'lowpass'),
+  spray: (c, o, t) => burst(c, o, t, 0.3, 3000, 0.6, 0.15, 'highpass'),
+  hit: (c, o, t) => burst(c, o, t, 0.12, 900, 0.7, 0.4),
+  explosion: (c, o, t) => {
+    burst(c, o, t, 0.6, 250, 0.5, 1.0, 'lowpass');
+    tone(c, o, t, 0.5, 90, 30, 0.9);
+  },
+  explosion_big: (c, o, t) => {
+    burst(c, o, t, 1.4, 180, 0.5, 1.3, 'lowpass');
+    tone(c, o, t, 1.0, 70, 25, 1.2);
+  },
+  nuke: (c, o, t) => {
+    burst(c, o, t, 3.0, 120, 0.4, 1.5, 'lowpass');
+    tone(c, o, t, 2.5, 60, 20, 1.5);
+    tone(c, o, t + 0.1, 1.2, 2000, 200, 0.3, 'sawtooth');
+  },
+  siren: (c, o, t) => {
+    for (let i = 0; i < 4; i++) tone(c, o, t + i * 0.5, 0.5, 500, 900, 0.25, 'triangle');
+  },
+  lance: (c, o, t) => {
+    tone(c, o, t, 2.0, 200, 1400, 0.4, 'sawtooth');
+    burst(c, o, t + 0.3, 2.0, 2500, 0.7, 0.3, 'highpass');
+  },
+  emp: (c, o, t) => {
+    tone(c, o, t, 0.8, 2500, 50, 0.5, 'sawtooth');
+    burst(c, o, t, 0.4, 4000, 1, 0.3, 'highpass');
+  },
+  bomb_drop: (c, o, t) => tone(c, o, t, 0.8, 1200, 300, 0.2, 'triangle'),
+  jet_pass: (c, o, t) => burst(c, o, t, 2.2, 600, 0.3, 0.5, 'bandpass'),
+  ack_move: (c, o, t) => tone(c, o, t, 0.06, 900, 1200, 0.15, 'square'),
+  ack_attack: (c, o, t) => {
+    tone(c, o, t, 0.06, 700, 500, 0.15, 'square');
+    tone(c, o, t + 0.07, 0.06, 900, 700, 0.15, 'square');
+  },
+  place: (c, o, t) => tone(c, o, t, 0.15, 400, 800, 0.25, 'triangle'),
+  complete: (c, o, t) => {
+    tone(c, o, t, 0.12, 660, 660, 0.2, 'triangle');
+    tone(c, o, t + 0.13, 0.2, 990, 990, 0.2, 'triangle');
+  },
+  unit_ready: (c, o, t) => tone(c, o, t, 0.15, 880, 1100, 0.15, 'triangle'),
+  sell: (c, o, t) => {
+    for (let i = 0; i < 5; i++) tone(c, o, t + i * 0.05, 0.05, 1500 + i * 200, 1500 + i * 200, 0.12, 'square');
+  },
+  cash: (c, o, t) => {
+    for (let i = 0; i < 3; i++) tone(c, o, t + i * 0.06, 0.08, 1800, 2400, 0.12, 'square');
+  },
+  promote: (c, o, t) => {
+    tone(c, o, t, 0.1, 523, 523, 0.15, 'triangle');
+    tone(c, o, t + 0.1, 0.1, 659, 659, 0.15, 'triangle');
+    tone(c, o, t + 0.2, 0.25, 784, 784, 0.15, 'triangle');
+  },
+  salvage: (c, o, t) => burst(c, o, t, 0.2, 2200, 2, 0.2),
+  repair: (c, o, t) => {
+    for (let i = 0; i < 4; i++) burst(c, o, t + i * 0.1, 0.06, 3000, 3, 0.15);
+  },
+  paradrop: (c, o, t) => burst(c, o, t, 1.5, 500, 0.3, 0.4),
+  ambush: (c, o, t) => burst(c, o, t, 0.4, 800, 0.4, 0.3),
+  click: (c, o, t) => tone(c, o, t, 0.04, 1200, 900, 0.1, 'square'),
+  error: (c, o, t) => tone(c, o, t, 0.15, 220, 160, 0.2, 'square'),
+  rankup: (c, o, t) => {
+    for (let i = 0; i < 4; i++) tone(c, o, t + i * 0.12, 0.2, 440 * Math.pow(2, i / 4), 440 * Math.pow(2, i / 4), 0.15, 'triangle');
+  },
+};
+
+const LIMITS: Record<string, number> = { rifle: 0.05, mg: 0.05, gatling: 0.04, hit: 0.06, rocket: 0.08, cannon: 0.08, explosion: 0.08 };
+
+export class AudioSys {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private lastPlayed = new Map<string, number>();
-  muted = false;
+  private last: Record<string, number> = {};
+  enabled = true;
+  evaEnabled = true;
+  listenerX = 0;
+  listenerY = 0;
+  private evaQueue: string[] = [];
+  private evaBusy = false;
+  onEva: ((msg: string) => void) | null = null;
 
-  /** Must be called from a user gesture (browsers block audio until then). */
+  /** Must be called from a user gesture on iOS. */
   unlock() {
-    if (!this.ctx) {
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!Ctx) return;
-      this.ctx = new Ctx();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.35;
-      this.master.connect(this.ctx.destination);
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      return;
     }
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    try {
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.5;
+      const comp = this.ctx.createDynamicsCompressor();
+      this.master.connect(comp).connect(this.ctx.destination);
+    } catch {
+      this.ctx = null;
+    }
+    if ('speechSynthesis' in window) window.speechSynthesis.getVoices();
   }
 
-  setMuted(m: boolean) {
-    this.muted = m;
-    if (this.master) this.master.gain.value = m ? 0 : 0.35;
+  play(name: string, x?: number, y?: number) {
+    if (!this.enabled || !this.ctx || !this.master) return;
+    const r = RECIPES[name];
+    if (!r) return;
+    const now = performance.now() / 1000;
+    const lim = LIMITS[name] ?? 0.03;
+    if (now - (this.last[name] ?? -1) < lim) return;
+    this.last[name] = now;
+    let vol = 1;
+    if (x !== undefined && y !== undefined) {
+      const d = dist(x, y, this.listenerX, this.listenerY);
+      vol = Math.max(0, 1 - d / 60);
+      if (vol <= 0.02) return;
+    }
+    const g = this.ctx.createGain();
+    g.gain.value = vol * vol;
+    g.connect(this.master);
+    try {
+      r(this.ctx, g, this.ctx.currentTime);
+    } catch {
+      /* ignore */
+    }
   }
 
-  /** Rate-limit identical sounds so 30 simultaneous hits don't clip. */
-  private gate(key: string, minGap: number) {
-    if (!this.ctx || this.muted) return false;
-    const now = this.ctx.currentTime;
-    if (now - (this.lastPlayed.get(key) ?? -1) < minGap) return false;
-    this.lastPlayed.set(key, now);
-    return true;
+  eva(msg: string) {
+    this.onEva?.(msg);
+    if (!this.evaEnabled || !this.enabled) return;
+    if (!('speechSynthesis' in window)) {
+      this.play('click');
+      return;
+    }
+    this.evaQueue.push(msg);
+    this.pumpEva();
   }
 
-  private tone(freq: number, dur: number, type: Wave, vol: number, slideTo?: number, delay = 0) {
-    const ctx = this.ctx!;
-    const t = ctx.currentTime + delay;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = type;
-    o.frequency.setValueAtTime(freq, t);
-    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g).connect(this.master!);
-    o.start(t);
-    o.stop(t + dur + 0.02);
-  }
-
-  private noise(dur: number, vol: number, lowpass: number) {
-    const ctx = this.ctx!;
-    const len = Math.floor(ctx.sampleRate * dur);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    const f = ctx.createBiquadFilter();
-    f.type = 'lowpass';
-    f.frequency.value = lowpass;
-    const g = ctx.createGain();
-    g.gain.value = vol;
-    src.connect(f).connect(g).connect(this.master!);
-    src.start();
-  }
-
-  shoot() {
-    if (this.gate('shoot', 0.06)) this.tone(880, 0.07, 'square', 0.05, 440);
-  }
-  turret() {
-    if (this.gate('turret', 0.08)) this.tone(620, 0.09, 'sawtooth', 0.035, 260);
-  }
-  hit() {
-    if (this.gate('hit', 0.05)) this.tone(200, 0.06, 'triangle', 0.08, 90);
-  }
-  pop() {
-    if (this.gate('pop', 0.04)) this.noise(0.12, 0.25, 1800);
-  }
-  /** Pickup pitch climbs with combo — the "ka-ching" streak feeling. */
-  pickup(combo: number) {
-    if (this.gate('pickup', 0.03)) this.tone(660 * Math.pow(1.03, Math.min(combo, 40)), 0.08, 'sine', 0.12);
-  }
-  pay(progress: number) {
-    if (this.gate('pay', 0.045)) this.tone(400 + progress * 500, 0.05, 'triangle', 0.07);
-  }
-  build() {
-    if (!this.gate('build', 0.1)) return;
-    [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.18, 'triangle', 0.14, undefined, i * 0.07));
-  }
-  hurt() {
-    if (this.gate('hurt', 0.15)) this.tone(160, 0.18, 'sawtooth', 0.12, 70);
-  }
-  boss() {
-    if (!this.gate('boss', 1)) return;
-    this.tone(90, 0.8, 'sawtooth', 0.18, 45);
-    this.noise(0.6, 0.3, 500);
-  }
-  wave() {
-    if (!this.gate('wave', 0.5)) return;
-    [392, 523].forEach((f, i) => this.tone(f, 0.25, 'square', 0.06, undefined, i * 0.12));
-  }
-  levelUp() {
-    if (!this.gate('levelup', 0.3)) return;
-    [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone(f, 0.25, 'triangle', 0.13, undefined, i * 0.06));
-    this.tone(2093, 0.5, 'sine', 0.05, undefined, 0.3);
-  }
-  /** A shower of coin "tinks" (treasure chests, combo milestones). */
-  treasure() {
-    if (!this.gate('treasure', 0.3)) return;
-    for (let i = 0; i < 14; i++) this.tone(1200 + Math.random() * 900, 0.08, 'sine', 0.07, undefined, i * 0.045);
-    this.tone(392, 0.4, 'triangle', 0.1);
-  }
-  boom() {
-    if (this.gate('boom', 0.2)) this.noise(0.9, 0.6, 700);
+  private pumpEva() {
+    if (this.evaBusy || !this.evaQueue.length) return;
+    const msg = this.evaQueue.shift()!;
+    if (this.evaQueue.length > 3) this.evaQueue.length = 3;
+    const u = new SpeechSynthesisUtterance(msg);
+    u.rate = 1.05;
+    u.pitch = 0.85;
+    u.volume = 0.9;
+    const voices = window.speechSynthesis.getVoices();
+    const v = voices.find((v) => /en[-_]US/i.test(v.lang) && /female|samantha|zira|google us/i.test(v.name)) ?? voices.find((v) => /en/i.test(v.lang));
+    if (v) u.voice = v;
+    this.evaBusy = true;
+    const done = () => {
+      this.evaBusy = false;
+      this.pumpEva();
+    };
+    u.onend = done;
+    u.onerror = done;
+    try {
+      window.speechSynthesis.speak(u);
+      setTimeout(done, 4000);
+    } catch {
+      done();
+    }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "name": "outpost-rush",
+  "name": "iron-doctrine",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,6 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "build:single": "tsc --noEmit && vite build --mode single",
     "preview": "vite preview --host",
+    "sim": "esbuild tools/sim/match.ts --bundle --platform=node --format=esm --outfile=dist-sim/match.mjs --log-level=error && node dist-sim/match.mjs",
+    "test": "esbuild tools/sim/scenarios.ts --bundle --platform=node --format=esm --outfile=dist-sim/scenarios.mjs --log-level=error && node dist-sim/scenarios.mjs",
     "cap:sync": "npm run build && cap sync",
     "ios": "npm run cap:sync && cap open ios",
     "android": "npm run cap:sync && cap open android"

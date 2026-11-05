@@ -2,161 +2,144 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
-    />
-    <meta name="theme-color" content="#2b1d12" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#10141a" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <title>Hearthguard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap" rel="stylesheet" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>Iron Doctrine</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./favicon.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Iron Doctrine" />
   </head>
   <body>
     <div id="app">
       <canvas id="c"></canvas>
-      <div id="world-ui"></div>
+      <canvas id="overlay"></canvas>
 
       <div id="hud" class="hidden">
-        <div class="top">
-          <div class="pill wave">
-            <span id="wave-label">Lands 0/7</span>
-            <div class="mini"><i id="wave-bar"></i></div>
-          </div>
-          <div class="pill keep">
-            <svg viewBox="0 0 24 24" class="ico"><path d="M3 21V8h3v3h3V8h2v3h2V8h2v3h3V8h3v13h-8v-5a2 2 0 0 0-4 0v5z" fill="#e9e2d4" stroke="#3a2a1a" stroke-width="1.4" stroke-linejoin="round"/></svg>
-            <div class="bar"><i id="keep-bar"></i></div>
-          </div>
-          <div class="pill gold" id="gold-pill">
-            <span class="coin"></span><span id="gold">0</span>
-          </div>
+        <div class="topbar">
+          <div class="stat money"><span class="ico">$</span><b id="hud-money">$0</b></div>
+          <div class="stat power"><span class="ico">⚡</span><div class="pbar"><i id="hud-power-fill"></i></div><b id="hud-power">0/0</b></div>
+          <button id="hud-rank" class="stat rank" title="Generals powers"></button>
+          <div class="stat clock" id="hud-clock">0:00</div>
+          <div class="spacer"></div>
+          <button id="btn-army" class="tb" title="Select all combat units (F)">⚔</button>
+          <button id="btn-base" class="tb" title="Go to base (H)">⌂</button>
+          <button id="btn-pause" class="tb" title="Pause">❚❚</button>
         </div>
-        <div class="xp">
-          <span class="xp-badge"><small>LV</small><b id="xp-level">1</b></span>
-          <div class="xp-bar"><i id="xp-fill"></i></div>
-          <span class="pill res" title="Archers with the king"><i class="res-ico archer"></i><span id="wood">0</span></span>
-          <span class="pill res" title="Knights with the king"><i class="res-ico knight"></i><span id="stone">0</span></span>
-          <span class="pill res" title="Lands claimed"><i class="res-ico land"></i><span id="food">0</span></span>
+        <div id="eva"></div>
+        <div id="toasts"></div>
+        <canvas id="minimap"></canvas>
+        <div id="sw-timers"></div>
+        <div id="powers"></div>
+        <div id="groups"></div>
+        <div id="rally-flag" class="hidden">⚑ rally set</div>
+        <div id="mode-hint" class="hidden"><span id="mode-hint-text"></span><button id="mode-cancel">✕</button></div>
+        <div id="cmdbar">
+          <div id="sel-info"></div>
+          <div id="cmd-row"></div>
         </div>
-        <button id="btn-nova" aria-label="Arcane Nova">
-          <span id="nova-fill"></span>
-          <svg viewBox="0 0 24 24"><path d="M12 2l2.2 6.6L21 9l-5.4 4.1L17.6 20 12 16.1 6.4 20l2-6.9L3 9l6.8-.4z"/></svg>
-          <small>NOVA</small>
-        </button>
-        <div id="combo"><span id="combo-num">×3</span><small>combo</small></div>
-        <div class="side">
-          <button id="btn-pause" class="round" aria-label="Pause">
-            <svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="#fff"/><rect x="14" y="5" width="4" height="14" rx="1" fill="#fff"/></svg>
-          </button>
-          <button id="btn-mute" class="round" aria-label="Mute">
-            <svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="#fff"/><path id="mute-waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/><path id="mute-x" d="M16 9l6 6M22 9l-6 6" stroke="#fff" stroke-width="2" stroke-linecap="round" style="display:none"/></svg>
-          </button>
-        </div>
-        <div id="banner"></div>
-        <div id="hint"></div>
-      </div>
-
-      <div id="joy-base"></div>
-      <div id="joy-knob"></div>
-
-      <div id="menu" class="overlay">
-        <div class="card">
-          <div class="crest">
-            <svg viewBox="0 0 64 72"><path d="M32 2 60 12v22c0 18-12 30-28 36C16 64 4 52 4 34V12z" fill="#2f6fd6" stroke="#ffd34d" stroke-width="4"/><path d="M20 44V26h4v4h4v-4h8v4h4v-4h4v18H36v-6a4 4 0 0 0-8 0v6z" fill="#fff4d6"/></svg>
+        <div id="promo" class="modal hidden">
+          <div class="card">
+            <h2>Generals Powers</h2>
+            <p id="promo-rank" class="sub"></p>
+            <div id="promo-list"></div>
+            <button id="promo-close" class="cta">Done</button>
           </div>
-          <h1>Hearthguard</h1>
-          <p class="sub">A King's Defense</p>
-          <ul class="tips">
-            <li><b>Drag</b> anywhere to move. Your king and his squad fight on their own</li>
-            <li><b>Stand on a plot</b> to pay for it with the gold stacked on your back</li>
-            <li><b>Recruit</b> archers and knights: they march with you</li>
-            <li><b>Stand on a lookout pad</b> to send archers up the platform</li>
-            <li><b>Fence in a patch of forest</b> to claim it: it clears into a meadow and new buildings unlock</li>
-            <li><b>Forge armour</b> and carry it to your troops to make them stronger</li>
-            <li><b>Claim every land</b>, then beat the Warlord's Host to win the kingdom</li>
-          </ul>
-          <button id="btn-play" class="cta">Play</button>
-          <p class="best" id="best"></p>
-          <p class="credit">3D art: KayKit (Kay Lousberg), Kenney, Quaternius · all CC0</p>
         </div>
       </div>
 
-      <div id="victory" class="overlay hidden">
-        <div class="card">
-          <div class="crest">
-            <svg viewBox="0 0 64 48"><path d="M4 40V10l14 14L32 4l14 20 14-14v30z" fill="#ffc928" stroke="#5a3a00" stroke-width="3" stroke-linejoin="round"/><circle cx="32" cy="30" r="5" fill="#e2343b"/></svg>
+      <div id="screen-main" class="screen">
+        <div class="menu-card">
+          <h1>Iron Doctrine</h1>
+          <p class="tag">Real-time strategy. Three factions. One phone.</p>
+          <button id="btn-skirmish" class="cta big">Skirmish</button>
+          <button id="btn-help" class="cta ghost">How to play</button>
+          <button id="btn-settings" class="cta ghost">Settings</button>
+          <p id="main-record" class="record"></p>
+        </div>
+      </div>
+
+      <div id="screen-setup" class="screen hidden">
+        <div class="setup">
+          <div class="setup-head"><button class="back" data-back>‹</button><h2>Skirmish</h2><button id="btn-start" class="cta">Start battle</button></div>
+          <div class="setup-body">
+            <section>
+              <h3>Map</h3>
+              <div id="setup-maps"></div>
+              <p id="setup-map-desc" class="sub"></p>
+            </section>
+            <section>
+              <h3>Your faction</h3>
+              <div id="setup-factions"></div>
+            </section>
+            <section>
+              <h3>Opponents</h3>
+              <div id="setup-opponents"></div>
+              <button id="btn-add-opp" class="cta ghost small">+ Add opponent</button>
+              <div class="opts">
+                <label>Starting cash <select id="opt-cash"></select></label>
+                <label>Teams <select id="opt-teams"><option value="ffa">Free for all</option><option value="vs">Everyone against you</option></select></label>
+                <label><input type="checkbox" id="opt-sw" /> Superweapons</label>
+              </div>
+            </section>
           </div>
-          <h2 id="victory-title">Victory!</h2>
-          <p class="big" id="victory-text"></p>
-          <button id="btn-victory-map" class="cta">To the world map</button>
         </div>
       </div>
 
-      <div id="worldmap" class="overlay hidden">
-        <div class="map-wrap">
-          <div class="map-head">
-            <h2>The Realm</h2>
-            <span class="pill crowns">👑 <span id="map-crowns">0</span></span>
+      <div id="screen-help" class="screen hidden">
+        <div class="menu-card wide">
+          <div class="setup-head"><button class="back" data-back>‹</button><h2>How to play</h2><span></span></div>
+          <div class="help">
+            <p><b>Goal:</b> destroy every enemy structure. Build a base, gather supplies, mass an army, and use your generals powers and superweapon.</p>
+            <ul>
+              <li><b>Tap</b> a unit or building to select it. <b>Double-tap</b> to select all of that type on screen.</li>
+              <li><b>Tap the ground</b> with units selected to move. Tap an enemy to attack. Tap a supply pile with a gatherer to harvest.</li>
+              <li><b>Drag</b> to pan the camera. <b>Pinch</b> to zoom. <b>Hold, then drag</b> to box-select units.</li>
+              <li>Select a <b>Dozer</b> (or Worker) and pick a structure from the bar, tap where to put it, then tap again to confirm.</li>
+              <li>Select a <b>building</b> to train units. Hold a unit button to cancel it from the queue. Set a <b>rally point</b> so new units gather where you want.</li>
+              <li><b>Power:</b> Coalition and Dominion need reactors. Low power slows production and shuts down defences. The Insurgency needs none.</li>
+              <li><b>Infantry capture</b> oil derricks and enemy buildings with the Capture button.</li>
+              <li><b>Generals powers</b> live in the right column. Destroying things earns rank; spend points with the ★ button.</li>
+              <li><b>Control groups:</b> tap a numbered chip to select, hold it to assign.</li>
+              <li>Keyboard (desktop): WASD pan, A attack-move, S stop, F select army, H home, 1–4 groups (Ctrl to assign), Esc cancel.</li>
+            </ul>
           </div>
-          <div class="map-board">
-            <svg class="map-art" viewBox="0 0 100 100" preserveAspectRatio="none">
-              <defs>
-                <linearGradient id="parch" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3e2bb"/><stop offset="1" stop-color="#e2c993"/></linearGradient>
-              </defs>
-              <rect width="100" height="100" fill="url(#parch)"/>
-              <path d="M0 88 Q20 80 30 90 T60 86 T100 92 V100 H0z" fill="#b9d7e8" opacity="0.7"/>
-              <path d="M60 0 L70 14 L78 6 L88 22 L96 10 L100 16 V0z" fill="#c9c2b4"/>
-              <path d="M66 6 l3 4 h-6z M84 12 l3 5 h-6z" fill="#fff"/>
-              <g fill="#7fae5a" opacity="0.8"><circle cx="12" cy="60" r="3"/><circle cx="16" cy="64" r="2.4"/><circle cx="35" cy="66" r="2.6"/><circle cx="56" cy="44" r="2.4"/><circle cx="60" cy="48" r="2.8"/></g>
-              <path d="M22 74 C34 70 40 62 48 56 S64 44 70 38 S78 24 82 16" stroke="#7a5a3a" stroke-width="0.8" stroke-dasharray="1.6 1.4" fill="none"/>
-            </svg>
-            <div id="map-nodes"></div>
-          </div>
-          <div id="map-card" class="card"></div>
-          <button id="btn-armory" class="cta ghost">⚔ King's Armory</button>
         </div>
       </div>
 
-      <div id="armory" class="overlay hidden">
-        <div class="card armory">
-          <h2>King's Armory</h2>
-          <p class="sub">Crowns: 👑 <span id="armory-crowns">0</span></p>
-          <div id="armory-list"></div>
-          <button id="btn-armory-close" class="cta">Done</button>
+      <div id="screen-settings" class="screen hidden">
+        <div class="menu-card">
+          <h2>Settings</h2>
+          <label class="row"><span>Sound effects</span><input type="checkbox" id="opt-sound" /></label>
+          <label class="row"><span>Voice announcements</span><input type="checkbox" id="opt-eva" /></label>
+          <label class="row"><span>Shadows</span><input type="checkbox" id="opt-shadows" /></label>
+          <button id="settings-back" class="cta">Back</button>
         </div>
       </div>
 
-      <div id="perks" class="overlay hidden">
-        <div class="perks-wrap">
-          <p class="perks-kicker">Level up!</p>
-          <h2 id="perks-level">Level 2</h2>
-          <p class="perks-sub">Choose a power</p>
-          <div id="perk-cards"></div>
-        </div>
-      </div>
-
-      <div id="paused" class="overlay hidden">
-        <div class="card">
+      <div id="screen-pause" class="screen dim hidden">
+        <div class="menu-card">
           <h2>Paused</h2>
-          <button id="btn-resume" class="cta">Resume</button>
-          <button id="btn-quit" class="cta ghost">Quit run</button>
+          <button id="btn-resume" class="cta big">Resume</button>
+          <button id="pause-settings" class="cta ghost">Settings</button>
+          <button id="btn-restart" class="cta ghost">Restart</button>
+          <button id="btn-quit" class="cta ghost">Quit to menu</button>
         </div>
       </div>
 
-      <div id="over" class="overlay hidden">
-        <div class="card">
-          <h2>The castle has fallen</h2>
-          <p class="big" id="over-wave"></p>
-          <p class="best" id="over-best"></p>
-          <button id="btn-again" class="cta">Try again</button>
-          <button id="btn-to-map" class="cta ghost">World map</button>
+      <div id="screen-result" class="screen dim hidden">
+        <div class="menu-card">
+          <h1 id="result-title">Victory</h1>
+          <div id="result-stats" class="stats"></div>
+          <button id="btn-result-again" class="cta big">Play again</button>
+          <button id="btn-result-menu" class="cta ghost">Main menu</button>
         </div>
       </div>
     </div>
-    <div id="rotate">
-      <svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2" fill="none" stroke="#ffc928" stroke-width="2"/><circle cx="12" cy="18.5" r="1" fill="#ffc928"/></svg>
-      <div>Rotate your phone to portrait</div>
-    </div>
+    <div id="rotate"><div>Rotate your phone to landscape</div></div>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>
