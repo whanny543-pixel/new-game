@@ -452,10 +452,12 @@ export class Hud {
       badge.className = 'cmd-badge';
       el.appendChild(badge);
       if (b.reason) el.title = b.reason;
-      let held = false, timer = 0;
+      let held = false, timer = 0, downX = 0, downY = 0;
       el.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
         held = false;
+        downX = e.clientX;
+        downY = e.clientY;
         if (b.onHold) timer = window.setTimeout(() => {
           held = true;
           b.onHold!();
@@ -466,6 +468,8 @@ export class Hud {
         e.stopPropagation();
         if (timer) clearTimeout(timer);
         if (held) return;
+        // A swipe to scroll the bar is not a tap.
+        if (Math.hypot(e.clientX - downX, e.clientY - downY) > 12) return;
         if (b.disabled) {
           this.toast(b.reason ?? 'Unavailable', 'error');
           return;
